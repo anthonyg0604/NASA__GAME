@@ -12,8 +12,8 @@ let isDragging = false;
 let prevMouseX = 0;
 let ccLastTime = 0;
 
-// Variables para la vista previa 3D estilo GTA en Ingeniería
-let garageTab = 'colors';
+// Variables para el Taller Modular Completo estilo GTA en Ingeniería
+let garageTab = 'primaryColors';
 let garageFeedbackMsg = '';
 let previewScene, previewCamera, previewRenderer, previewRocket, previewAnimId;
 let previewRotY = 0.6;
@@ -37,7 +37,7 @@ function initControlCenter() {
     ccRenderer.shadowMap.enabled = true;
     container.appendChild(ccRenderer.domElement);
 
-    ccScene.add(new THREE.AmbientLight(0x94a3b8, 0.9));
+    ccScene.add(new THREE.AmbientLight(0x94a3b8, 0.95));
 
     const mainLight = new THREE.DirectionalLight(0xe0f2fe, 1.15);
     mainLight.position.set(8, 18, 10);
@@ -69,8 +69,10 @@ function rebuildControlCenterAstronaut(pos) {
         ccScene.remove(astroRig.group);
     }
     const role = GAME_STATE.selectedRole;
-    astroRig = createDetailedAstronaut(role.colorHex, {
+    const char = GAME_DATA.characters.find(c => c.id === GAME_STATE.selectedCharacterId) || GAME_DATA.characters[0];
+    astroRig = createBackyardiganCharacter(char.id, {
         name: MP.myName,
+        charName: char.name.split(' ')[0],
         roleShort: role.short,
         colorCss: role.colorCss
     });
@@ -86,23 +88,31 @@ function syncAllRemoteAstronauts(time, dt) {
         if (p.id === MP.myId) return;
         activeIds.add(p.id);
 
-        if (!remoteCCAstros[p.id]) {
+        const charId = p.characterId || 'uniqua';
+        if (!remoteCCAstros[p.id] || remoteCCAstros[p.id].charId !== charId) {
+            if (remoteCCAstros[p.id]) {
+                ccScene.remove(remoteCCAstros[p.id].rig.group);
+            }
             const role = GAME_DATA.roles.find(r => r.id === p.roleId) || GAME_DATA.roles[0];
-            const rig = createDetailedAstronaut(role.colorHex, {
+            const char = GAME_DATA.characters.find(c => c.id === charId) || GAME_DATA.characters[1];
+            const rig = createBackyardiganCharacter(charId, {
                 name: p.name,
+                charName: char.name.split(' ')[0],
                 roleShort: role.short,
                 colorCss: role.colorCss
             });
             rig.group.position.set(p.x || 0, p.y || 0, p.z || 3);
             ccScene.add(rig.group);
-            remoteCCAstros[p.id] = rig;
+            remoteCCAstros[p.id] = { rig, charId };
         }
 
-        const rig = remoteCCAstros[p.id];
+        const rig = remoteCCAstros[p.id].rig;
         rig.group.position.x += (p.x - rig.group.position.x) * 0.2;
         rig.group.position.y += ((p.y || 0) - rig.group.position.y) * 0.25;
         rig.group.position.z += (p.z - rig.group.position.z) * 0.2;
         rig.group.rotation.y = p.rotY || 0;
+
+        if (rig.propellerMesh) rig.propellerMesh.rotation.y += 0.25;
 
         if ((p.y || 0) > 0.1) {
             rig.leftArm.rotation.x = -0.6;
@@ -123,7 +133,7 @@ function syncAllRemoteAstronauts(time, dt) {
 
     Object.keys(remoteCCAstros).forEach(id => {
         if (!activeIds.has(id)) {
-            ccScene.remove(remoteCCAstros[id].group);
+            ccScene.remove(remoteCCAstros[id].rig.group);
             delete remoteCCAstros[id];
         }
     });
@@ -243,7 +253,7 @@ function buildStations() {
     stations = [];
     const stationConfigs = [
         { id: 'planning', num: '01', title: 'PLANIFICACIÓN', sub: 'DESTINO Y PLANETA', x: 5.5, z: 1.5, rotY: -0.35, color: '#38bdf8', hex: 0x38bdf8 },
-        { id: 'engineering', num: '02', title: 'INGENIERÍA', sub: 'TALLER DE NAVE (GTA)', x: -5.5, z: 1.5, rotY: 0.35, color: '#10b981', hex: 0x10b981 },
+        { id: 'engineering', num: '02', title: 'INGENIERÍA', sub: 'CUSTOMIZAR NAVE (8 PIEZAS)', x: -5.5, z: 1.5, rotY: 0.35, color: '#10b981', hex: 0x10b981 },
         { id: 'launch', num: '03', title: 'LANZAMIENTO', sub: 'DESPEGUE A ÓRBITA', x: 4.5, z: -5.5, rotY: -0.25, color: '#f59e0b', hex: 0xf59e0b },
         { id: 'operations', num: '04', title: 'OPERACIONES', sub: 'SIMULADOR DIRECTO', x: -4.5, z: -5.5, rotY: 0.25, color: '#a855f7', hex: 0xa855f7 }
     ];
@@ -336,7 +346,6 @@ function setupControlCenterEvents(container) {
             }
         }
 
-        // Interactuar con [E]
         if (key === 'e' && activeStation && !isModalOpen) {
             openStationModal(activeStation);
         }
@@ -387,6 +396,10 @@ function updateAstronautAndCamera(time, dt) {
     if (windowPlanet && windowPlanet.sphere) windowPlanet.sphere.rotation.y += 0.0022;
     syncAllRemoteAstronauts(time, dt);
 
+    if (astroRig && astroRig.propellerMesh) {
+        astroRig.propellerMesh.rotation.y += 0.25;
+    }
+
     const isLobbyOpen = !document.getElementById('lobby-modal').classList.contains('hidden');
     if (isModalOpen || isLobbyOpen) return;
 
@@ -424,7 +437,6 @@ function updateAstronautAndCamera(time, dt) {
         }
     }
 
-    // Animación de extremidades
     if (!astroGrounded) {
         astroRig.leftArm.rotation.x = -0.65;
         astroRig.rightArm.rotation.x = -0.65;
@@ -502,11 +514,12 @@ function openStationModal(station) {
         garageFeedbackMsg = '';
         renderGarageContent();
     } else {
+        const sc = GAME_STATE.shipConfig;
         body.innerHTML = `
             <div style="text-align:center; padding: 10px 0;">
                 <p style="font-size:1.05rem; margin-bottom:8px;">Destino: <strong style="color:#38bdf8;">${GAME_STATE.selectedMission.name}</strong> (<span style="color:#fbbf24;">+${GAME_STATE.selectedMission.rewardCredits} CR</span>)</p>
                 <p style="color:#94a3b8; margin-bottom:8px;">Rol activo: <strong style="color:${GAME_STATE.selectedRole.colorCss};">${GAME_STATE.selectedRole.name}</strong></p>
-                <p style="color:#94a3b8; margin-bottom:16px;">Nave equipada: <strong>${GAME_STATE.shipConfig.color.name}</strong> • <strong>${GAME_STATE.shipConfig.booster.name}</strong> • <strong>${GAME_STATE.shipConfig.wing.name}</strong></p>
+                <p style="color:#94a3b8; margin-bottom:16px;">Piezas instaladas: <strong>${sc.hull.name}</strong> • <strong>${sc.cockpit.name}</strong> • <strong>${sc.booster.name}</strong> • <strong>${sc.wing.name}</strong></p>
                 <p style="background:rgba(56,189,248,0.14); border:1px solid #38bdf8; padding:12px; border-radius:10px; font-size:0.9rem; margin-bottom:18px;">
                     🧭 <strong>Misión:</strong> Pilota tu nave personalizada esquivando meteoritos. Al aterrizar en la base del planeta, completa las <strong>3 pantallas iluminadas de tu rol</strong> y vuelve al centro verde para cobrar tu recompensa.
                 </p>
@@ -518,29 +531,46 @@ function openStationModal(station) {
     modal.classList.remove('hidden');
 }
 
-// Renderiza el Taller de Modificación de Nave estilo GTA con vista previa 3D
+// Renderiza el Taller Modular Completo (8 categorías de piezas + personajes)
 function renderGarageContent() {
     const body = document.getElementById('modal-body');
     const title = document.getElementById('modal-title');
-    title.innerHTML = `02 • TALLER DE NAVE (LOS SANTOS ORBITAL) <span style="float:right; color:#fbbf24; font-size:1rem;">💰 ${GAME_STATE.credits} CR</span>`;
+    title.innerHTML = `02 • TALLER MODULAR DE NAVE <span style="float:right; color:#fbbf24; font-size:1rem;">💰 ${GAME_STATE.credits} CR</span>`;
 
     const tabs = [
-        { id: 'colors', label: '🎨 Pintura' },
-        { id: 'boosters', label: '🔥 Propulsores' },
-        { id: 'wings', label: '🛸 Alas' },
+        { id: 'primaryColors', label: '🎨 Color 1' },
+        { id: 'secondaryColors', label: '🖌️ Color 2' },
+        { id: 'hulls', label: '🚀 Fuselaje' },
+        { id: 'cockpits', label: '🪟 Cabina' },
         { id: 'noses', label: '🛡️ Morro' },
-        { id: 'addons', label: '📡 Accesorios' },
-        { id: 'roles', label: '👨‍🚀 Rol' }
+        { id: 'wings', label: '🛸 Alas' },
+        { id: 'boosters', label: '🔥 Motores' },
+        { id: 'addons', label: '📡 Extras' },
+        { id: 'crew', label: '🐾 Personaje/Rol' }
     ];
 
+    const sc = GAME_STATE.shipConfig;
     const stats = GAME_STATE.getShipTotalStats();
-    const speedPct = Math.min(100, Math.round(((stats.speedMult - 0.8) / 0.9) * 100));
-    const shieldPct = Math.min(100, Math.round(((100 + stats.shieldBonus) / 220) * 100));
-    const o2Pct = Math.min(100, Math.round(((130 + stats.o2Bonus) / 260) * 100));
+    const speedPct = Math.min(100, Math.round(((stats.speedMult - 0.8) / 1.0) * 100));
+    const shieldPct = Math.min(100, Math.round(((100 + stats.shieldBonus) / 260) * 100));
+    const o2Pct = Math.min(100, Math.round(((130 + stats.o2Bonus) / 300) * 100));
 
     let itemsHtml = '';
-    if (garageTab === 'roles') {
+    if (garageTab === 'crew') {
         itemsHtml = `
+            <div class="section-label">Selecciona tu Backyardigan</div>
+            <div class="option-grid">
+                ${GAME_DATA.characters.map(c => `
+                    <div class="option-card ${GAME_STATE.selectedCharacterId === c.id ? 'selected' : ''}" onclick="selectCharacterInGarage('${c.id}')">
+                        <h4><span class="color-swatch" style="background:${c.colorCss};"></span> ${c.name}</h4>
+                        <p>${c.species}</p>
+                        <span class="price-badge ${GAME_STATE.selectedCharacterId === c.id ? 'equipped' : 'unlocked'}">
+                            ${GAME_STATE.selectedCharacterId === c.id ? '✓ PERSONAJE ACTIVO' : 'ELEGIR'}
+                        </span>
+                    </div>
+                `).join('')}
+            </div>
+            <div class="section-label">Selecciona tu Rol</div>
             <div class="option-grid">
                 ${GAME_DATA.roles.map(role => `
                     <div class="option-card ${GAME_STATE.selectedRole.id === role.id ? 'selected' : ''}" onclick="selectRole('${role.id}')">
@@ -555,8 +585,17 @@ function renderGarageContent() {
         `;
     } else {
         const list = GAME_DATA.shipCustomization[garageTab];
-        const keyMap = { colors: 'color', boosters: 'booster', wings: 'wing', noses: 'nose', addons: 'addon' };
-        const equippedId = GAME_STATE.shipConfig[keyMap[garageTab]].id;
+        const keyMap = {
+            primaryColors: 'primaryColor',
+            secondaryColors: 'secondaryColor',
+            hulls: 'hull',
+            cockpits: 'cockpit',
+            noses: 'nose',
+            wings: 'wing',
+            boosters: 'booster',
+            addons: 'addon'
+        };
+        const equippedId = sc[keyMap[garageTab]].id;
 
         itemsHtml = `
             <div class="option-grid">
@@ -568,7 +607,7 @@ function renderGarageContent() {
                     if (isEquipped) {
                         badgeHtml = `<span class="price-badge equipped">✓ EQUIPADO</span>`;
                     } else if (isUnlocked) {
-                        badgeHtml = `<span class="price-badge unlocked">DESBLOQUEADO (Equipar)</span>`;
+                        badgeHtml = `<span class="price-badge unlocked">DESBLOQUEADO (Instalar)</span>`;
                     } else {
                         badgeHtml = `<span class="price-badge locked">🔒 ${item.price} CR — Comprar</span>`;
                     }
@@ -588,18 +627,24 @@ function renderGarageContent() {
         <div class="garage-layout">
             <div class="garage-left">
                 <div id="ship-preview-canvas"></div>
-                <p style="font-size:0.75rem; color:#94a3b8; margin-bottom:10px;">Arrastra con el ratón para girar la nave 3D</p>
+                <p style="font-size:0.74rem; color:#94a3b8; margin-bottom:8px;">Arrastra con el ratón para girar la nave 3D</p>
+                <div class="equipped-summary">
+                    <strong>Configuración actual:</strong><br>
+                    • Casco: ${sc.hull.name} | Cabina: ${sc.cockpit.name}<br>
+                    • Morro: ${sc.nose.name} | Alas: ${sc.wing.name}<br>
+                    • Motor: ${sc.booster.name} | Extra: ${sc.addon.name}
+                </div>
                 <div class="garage-stats">
                     <div class="stat-row">
-                        <span><strong>🚀 Velocidad de Vuelo</strong><strong>${Math.round(stats.speedMult * 100)}%</strong></span>
+                        <span><strong>🚀 Velocidad</strong><strong>${Math.round(stats.speedMult * 100)}%</strong></span>
                         <div class="progress-track"><div class="progress-fill cyan" style="width:${speedPct}%;"></div></div>
                     </div>
                     <div class="stat-row">
-                        <span><strong>🛡️ Blindaje / Escudo</strong><strong>${100 + stats.shieldBonus}%</strong></span>
+                        <span><strong>🛡️ Escudo</strong><strong>${100 + stats.shieldBonus}%</strong></span>
                         <div class="progress-track"><div class="progress-fill amber" style="width:${shieldPct}%;"></div></div>
                     </div>
                     <div class="stat-row">
-                        <span><strong>🫁 Capacidad Oxígeno</strong><strong>${130 + stats.o2Bonus}s</strong></span>
+                        <span><strong>🫁 Oxígeno</strong><strong>${130 + stats.o2Bonus}s</strong></span>
                         <div class="progress-track"><div class="progress-fill green" style="width:${o2Pct}%;"></div></div>
                     </div>
                 </div>
@@ -630,12 +675,21 @@ function handleGarageItemClick(category, itemId) {
     const item = list.find(i => i.id === itemId);
     if (!item) return;
 
-    const keyMap = { colors: 'color', boosters: 'booster', wings: 'wing', noses: 'nose', addons: 'addon' };
+    const keyMap = {
+        primaryColors: 'primaryColor',
+        secondaryColors: 'secondaryColor',
+        hulls: 'hull',
+        cockpits: 'cockpit',
+        noses: 'nose',
+        wings: 'wing',
+        boosters: 'booster',
+        addons: 'addon'
+    };
     const isUnlocked = GAME_STATE.unlockedParts.includes(item.id);
 
     if (isUnlocked) {
         GAME_STATE.shipConfig[keyMap[category]] = item;
-        garageFeedbackMsg = `✓ Pieza equipada: ${item.name}`;
+        garageFeedbackMsg = `✓ Pieza instalada: ${item.name}`;
         GAME_STATE.saveProgress();
         renderGarageContent();
     } else {
@@ -643,15 +697,25 @@ function handleGarageItemClick(category, itemId) {
             GAME_STATE.credits -= item.price;
             GAME_STATE.unlockedParts.push(item.id);
             GAME_STATE.shipConfig[keyMap[category]] = item;
-            garageFeedbackMsg = `🎉 ¡Comprado y equipado: ${item.name} (-${item.price} CR)!`;
+            garageFeedbackMsg = `🎉 ¡Pieza comprada e instalada: ${item.name} (-${item.price} CR)!`;
             GAME_STATE.saveProgress();
             updateCreditsHUD();
             renderGarageContent();
         } else {
-            garageFeedbackMsg = `⚠️ Créditos insuficientes (${item.price} CR). ¡Viaja a un planeta y completa tus misiones para ganar más!`;
+            garageFeedbackMsg = `⚠️ Créditos insuficientes (${item.price} CR). ¡Completa misiones en los planetas para ganar más!`;
             renderGarageContent();
         }
     }
+}
+
+function selectCharacterInGarage(charId) {
+    GAME_STATE.selectedCharacterId = charId;
+    GAME_STATE.saveProgress();
+    MP.syncLocalPlayerEntry();
+    MP.renderPlayersList();
+    MP.broadcastRoomState();
+    rebuildControlCenterAstronaut(astroRig.group.position.clone());
+    renderGarageContent();
 }
 
 function initShipPreview3D() {
@@ -673,7 +737,7 @@ function initShipPreview3D() {
     previewScene.add(dirLight);
 
     previewRocket = buildCustom3DRocket(true);
-    previewRocket.scale.setScalar(0.85);
+    previewRocket.scale.setScalar(0.84);
     previewRocket.rotation.y = previewRotY;
     previewScene.add(previewRocket);
 
@@ -726,12 +790,11 @@ function selectMission(id) {
 function selectRole(id) {
     GAME_STATE.selectedRole = GAME_DATA.roles.find(r => r.id === id);
     MP.syncLocalPlayerEntry();
-    MP.rebuildBotSlots();
     MP.renderPlayersList();
     MP.broadcastRoomState();
     rebuildControlCenterAstronaut(astroRig.group.position.clone());
     updateTopMissionBadge();
-    if (garageTab === 'roles') {
+    if (garageTab === 'crew') {
         renderGarageContent();
     } else {
         openStationModal(activeStation);
