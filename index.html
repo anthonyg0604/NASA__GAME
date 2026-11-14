@@ -20,15 +20,18 @@
 
             <div class="lobby-grid">
                 <div>
-                    <div class="section-label">1. Tu Nombre de Astronauta</div>
-                    <input type="text" id="player-name-input" class="text-input" value="Comandante 1" maxlength="16" placeholder="Escribe tu nombre...">
+                    <div class="section-label">1. Tu Nombre de Tripulante</div>
+                    <input type="text" id="player-name-input" class="text-input" value="Pablo" maxlength="16" placeholder="Escribe tu nombre...">
 
-                    <div class="section-label">2. Elige tu Rol en la Nave</div>
+                    <div class="section-label">2. Elige tu Personaje (Backyardigans)</div>
+                    <div class="char-grid" id="lobby-char-grid"></div>
+
+                    <div class="section-label">3. Elige tu Rol en la Nave</div>
                     <div class="role-mini-grid" id="lobby-role-grid"></div>
                 </div>
 
                 <div>
-                    <div class="section-label">3. Cantidad de Jugadores en la Sala</div>
+                    <div class="section-label">4. Cupo Máximo de Jugadores en la Sala</div>
                     <div class="count-selector" id="player-count-selector">
                         <button class="count-btn" data-count="1">1</button>
                         <button class="count-btn" data-count="2">2</button>
@@ -48,8 +51,8 @@
                             <strong id="generated-room-code">----</strong>
                         </div>
                         <label class="checkbox-row">
-                            <input type="checkbox" id="fill-bots-checkbox" checked>
-                            <span>Completar puestos vacíos con tripulantes IA (para ver los 4 en la nave)</span>
+                            <input type="checkbox" id="fill-bots-checkbox">
+                            <span>Completar puestos vacíos con bots IA (opcional)</span>
                         </label>
                         <div id="lobby-players-list" class="players-list"></div>
                         <button id="start-session-btn" class="btn-primary">👨‍🚀 ENTRAR A LA NAVE</button>
@@ -79,7 +82,7 @@
                     💰 Créditos: <strong id="hud-credits">500 CR</strong>
                 </div>
                 <button id="room-info-pill" class="mission-pill room-pill" title="Ver código de sala">
-                    👥 Sala: <strong id="hud-room-code">LOCAL</strong> (<span id="hud-player-count">4/4</span>)
+                    👥 Sala: <strong id="hud-room-code">LOCAL</strong> (<span id="hud-player-count">1/4</span>)
                 </button>
                 <div class="mission-pill" id="active-mission-badge">
                     Destino: <strong>Base Lunar Shackleton</strong> | Rol: <strong>Comandante</strong>
