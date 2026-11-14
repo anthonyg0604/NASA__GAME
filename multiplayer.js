@@ -1,20 +1,34 @@
+function getPersistentClientId() {
+    try {
+        let id = sessionStorage.getItem('cubo_phora_pid');
+        if (!id) {
+            id = 'p_' + Math.random().toString(36).substring(2, 9);
+            sessionStorage.setItem('cubo_phora_pid', id);
+        }
+        return id;
+    } catch (_) {
+        return 'p_' + Math.random().toString(36).substring(2, 9);
+    }
+}
+
 const MP = {
     isHost: true,
     roomCode: '',
     maxPlayers: 4,
-    myId: 'local_' + Math.random().toString(36).substring(2, 7),
-    myName: 'Comandante 1',
-    fillWithBots: true,
+    myId: getPersistentClientId(),
+    myName: 'Pablo',
+    fillWithBots: false, // Desactivado por defecto para que no aparezcan muñecos IA no deseados
     peer: null,
     hostConn: null,
     guestConns: [],
-    players: {}, // id -> { id, name, roleId, isBot, x, y, z, rotY, moving, targetX, targetZ }
+    players: {}, // id -> { id, name, characterId, roleId, isBot, x, y, z, rotY, moving }
     lastSendTime: 0,
 
     initLobbyUI() {
         this.roomCode = String(Math.floor(1000 + Math.random() * 9000));
         document.getElementById('generated-room-code').innerText = this.roomCode;
 
+        this.renderLobbyCharacters();
         this.renderLobbyRoles();
         this.setupHostPeer();
         this.syncLocalPlayerEntry();
@@ -33,7 +47,7 @@ const MP = {
         });
 
         document.getElementById('player-name-input').oninput = e => {
-            this.myName = e.target.value.trim() || 'Astronauta';
+            this.myName = e.target.value.trim() || 'Tripulante';
             this.syncLocalPlayerEntry();
             this.renderPlayersList();
             this.broadcastRoomState();
@@ -43,6 +57,7 @@ const MP = {
             this.fillWithBots = e.target.checked;
             this.rebuildBotSlots();
             this.renderPlayersList();
+            this.broadcastRoomState();
         };
 
         document.getElementById('tab-create-btn').onclick = () => {
@@ -51,6 +66,10 @@ const MP = {
             document.getElementById('tab-join-btn').classList.remove('active');
             document.getElementById('panel-create-room').classList.remove('hidden');
             document.getElementById('panel-join-room').classList.add('hidden');
+            this.players = {};
+            this.syncLocalPlayerEntry();
+            this.rebuildBotSlots();
+            this.renderPlayersList();
             this.setupHostPeer();
         };
 
@@ -81,14 +100,48 @@ const MP = {
         };
     },
 
+    renderLobbyCharacters() {
+        const grid = document.getElementById('lobby-char-grid');
+        if (!grid) return;
+        grid.innerHTML = GAME_DATA.characters.map(c => `
+            <div class="char-card ${GAME_STATE.selectedCharacterId === c.id ? 'selected' : ''}" data-char="${c.id}">
+                <span class="color-swatch" style="background:${c.colorCss};"></span>
+                <div>
+                    <strong style="font-size:0.84rem; display:block;">${c.name}</strong>
+                    <span style="font-size:0.72rem; color:#94a3b8;">${c.species}</span>
+                </div>
+            </div>
+        `).join('');
+
+        grid.querySelectorAll('.char-card').forEach(el => {
+            el.onclick = () => {
+                GAME_STATE.selectedCharacterId = el.dataset.char;
+                GAME_STATE.saveProgress();
+                const charObj = GAME_DATA.characters.find(x => x.id === el.dataset.char);
+                const nameInput = document.getElementById('player-name-input');
+                if (charObj && ['Pablo', 'Uniqua (Yonicua)', 'Tyrone', 'Tasha', 'Comandante 1'].includes(nameInput.value)) {
+                    nameInput.value = charObj.name.split(' ')[0];
+                    this.myName = nameInput.value;
+                }
+                this.renderLobbyCharacters();
+                this.syncLocalPlayerEntry();
+                this.renderPlayersList();
+                if (typeof rebuildControlCenterAstronaut === 'function' && astroRig) {
+                    rebuildControlCenterAstronaut(astroRig.group.position.clone());
+                }
+                this.broadcastRoomState();
+            };
+        });
+    },
+
     renderLobbyRoles() {
         const grid = document.getElementById('lobby-role-grid');
         grid.innerHTML = GAME_DATA.roles.map(r => `
             <div class="role-mini-item ${GAME_STATE.selectedRole.id === r.id ? 'selected' : ''}" data-role="${r.id}">
                 <span class="color-swatch" style="background:${r.colorCss};"></span>
                 <div>
-                    <strong style="font-size:0.88rem; display:block;">${r.name}</strong>
-                    <span style="font-size:0.75rem; color:#94a3b8;">${r.bonus}</span>
+                    <strong style="font-size:0.84rem; display:block;">${r.name}</strong>
+                    <span style="font-size:0.72rem; color:#94a3b8;">${r.bonus}</span>
                 </div>
             </div>
         `).join('');
@@ -99,7 +152,6 @@ const MP = {
                 GAME_STATE.selectedRole = role;
                 this.renderLobbyRoles();
                 this.syncLocalPlayerEntry();
-                this.rebuildBotSlots();
                 this.renderPlayersList();
                 if (typeof rebuildControlCenterAstronaut === 'function' && astroRig) {
                     rebuildControlCenterAstronaut(astroRig.group.position.clone());
@@ -111,19 +163,22 @@ const MP = {
     },
 
     syncLocalPlayerEntry() {
+        const prev = this.players[this.myId] || {};
         this.players[this.myId] = {
             id: this.myId,
             name: this.myName,
+            characterId: GAME_STATE.selectedCharacterId,
             roleId: GAME_STATE.selectedRole.id,
             isBot: false,
-            x: 0,
-            y: 0,
-            z: 4.5,
-            rotY: 0,
+            x: prev.x ?? 0,
+            y: prev.y ?? 0,
+            z: prev.z ?? 4.5,
+            rotY: prev.rotY ?? 0,
             moving: false
         };
     },
 
+    // Garantiza que nunca se exceda maxPlayers ni se dupliquen bots
     rebuildBotSlots() {
         Object.keys(this.players).forEach(pid => {
             if (this.players[pid].isBot) delete this.players[pid];
@@ -134,22 +189,27 @@ const MP = {
         const currentRealCount = Object.values(this.players).filter(p => !p.isBot).length;
         const neededBots = Math.max(0, this.maxPlayers - currentRealCount);
 
+        const usedChars = new Set(Object.values(this.players).map(p => p.characterId));
+        const freeChars = GAME_DATA.characters.filter(c => !usedChars.has(c.id));
+
         const usedRoles = new Set(Object.values(this.players).map(p => p.roleId));
         const freeRoles = GAME_DATA.roles.filter(r => !usedRoles.has(r.id));
 
         const spawnSpots = [
-            { x: -2.2, z: 3.5 },
-            { x: 2.2, z: 3.5 },
-            { x: -1.6, z: 1.5 }
+            { x: -2.6, z: 2.8 },
+            { x: 2.6, z: 2.8 },
+            { x: -1.8, z: 1.0 }
         ];
 
         for (let i = 0; i < neededBots; i++) {
+            const char = freeChars[i] || GAME_DATA.characters[(i + 1) % GAME_DATA.characters.length];
             const role = freeRoles[i] || GAME_DATA.roles[(i + 1) % GAME_DATA.roles.length];
             const spot = spawnSpots[i % spawnSpots.length];
             const botId = 'bot_' + i;
             this.players[botId] = {
                 id: botId,
-                name: `${role.short} (IA)`,
+                name: `${char.name.split(' ')[0]} (IA)`,
+                characterId: char.id,
                 roleId: role.id,
                 isBot: true,
                 x: spot.x,
@@ -159,7 +219,7 @@ const MP = {
                 moving: false,
                 targetX: spot.x,
                 targetZ: spot.z,
-                waitTimer: 1 + Math.random() * 2
+                waitTimer: 1.5 + Math.random() * 2.5
             };
         }
     },
@@ -169,9 +229,10 @@ const MP = {
         const all = Object.values(this.players);
         list.innerHTML = all.map(p => {
             const role = GAME_DATA.roles.find(r => r.id === p.roleId) || GAME_DATA.roles[0];
+            const char = GAME_DATA.characters.find(c => c.id === p.characterId) || GAME_DATA.characters[0];
             return `
                 <div class="player-slot-row">
-                    <span><span class="color-swatch" style="background:${role.colorCss}; vertical-align:middle; margin-right:6px;"></span><strong>${p.name}</strong></span>
+                    <span><span class="color-swatch" style="background:${char.colorCss}; vertical-align:middle; margin-right:6px;"></span><strong>${p.name}</strong> <small style="color:#94a3b8;">(${char.name.split(' ')[0]})</small></span>
                     <span style="color:${role.colorCss}; font-weight:600;">${role.short}</span>
                 </div>
             `;
@@ -196,6 +257,7 @@ const MP = {
                 document.getElementById('net-status-badge').innerText = `● Sala Online #${this.roomCode}`;
             });
             this.peer.on('connection', conn => {
+                this.guestConns = this.guestConns.filter(c => c.open);
                 this.guestConns.push(conn);
                 conn.on('data', data => this.handleHostData(conn, data));
                 conn.on('close', () => {
@@ -209,19 +271,32 @@ const MP = {
                 });
             });
             this.peer.on('error', () => {
-                document.getElementById('net-status-badge').innerText = '● Modo Local / IA Activo';
+                document.getElementById('net-status-badge').innerText = '● Modo Local Activo';
             });
         } catch (_) {}
     },
 
     handleHostData(conn, data) {
         if (data.type === 'JOIN') {
-            conn.peerPlayerId = data.player.id;
-            const botKeys = Object.keys(this.players).filter(k => this.players[k].isBot);
-            if (Object.keys(this.players).length >= this.maxPlayers && botKeys.length > 0) {
-                delete this.players[botKeys[0]];
+            const incomingId = data.player.id;
+
+            // Si esta misma conexión tenía otro ID previo, limpiarlo
+            if (conn.peerPlayerId && conn.peerPlayerId !== incomingId) {
+                delete this.players[conn.peerPlayerId];
             }
-            this.players[data.player.id] = { ...data.player, isBot: false };
+
+            // Verificar cupo máximo de humanos sin contar bots
+            const existingHumans = Object.values(this.players).filter(p => !p.isBot && p.id !== incomingId);
+            if (existingHumans.length >= this.maxPlayers) {
+                if (conn.open) conn.send({ type: 'ROOM_FULL', maxPlayers: this.maxPlayers });
+                return;
+            }
+
+            conn.peerPlayerId = incomingId;
+            this.players[incomingId] = { ...data.player, isBot: false };
+
+            // Reajustar bots estrictamente dentro del límite maxPlayers
+            this.rebuildBotSlots();
             this.renderPlayersList();
             this.broadcastRoomState();
         } else if (data.type === 'MOVE') {
@@ -249,17 +324,22 @@ const MP = {
             this.hostConn = conn;
             conn.on('open', () => {
                 this.roomCode = code;
+                this.players = {};
                 this.syncLocalPlayerEntry();
                 conn.send({ type: 'JOIN', player: this.players[this.myId] });
-                document.getElementById('lobby-modal').classList.add('hidden');
-                this.updateHudBadge();
             });
             conn.on('data', data => {
-                if (data.type === 'ROOM_STATE') {
+                if (data.type === 'ROOM_FULL') {
+                    document.getElementById('join-feedback').innerText = `⚠️ Sala llena (${data.maxPlayers}/${data.maxPlayers} jugadores).`;
+                    try { conn.close(); } catch (_) {}
+                } else if (data.type === 'ROOM_STATE') {
                     this.maxPlayers = data.maxPlayers;
                     const myLocal = this.players[this.myId];
                     this.players = data.players;
-                    if (myLocal) this.players[this.myId] = myLocal;
+                    if (myLocal && this.players[this.myId]) {
+                        Object.assign(this.players[this.myId], myLocal);
+                    }
+                    document.getElementById('lobby-modal').classList.add('hidden');
                     this.updateHudBadge();
                 } else if (data.type === 'MOVE') {
                     if (data.id !== this.myId && this.players[data.id]) {
@@ -290,13 +370,25 @@ const MP = {
 
     sendMyPosition(x, y, z, rotY, moving) {
         if (this.players[this.myId]) {
-            Object.assign(this.players[this.myId], { x, y, z, rotY, moving });
+            Object.assign(this.players[this.myId], {
+                x, y, z, rotY, moving,
+                characterId: GAME_STATE.selectedCharacterId,
+                roleId: GAME_STATE.selectedRole.id
+            });
         }
         const now = performance.now();
         if (now - this.lastSendTime < 45) return;
         this.lastSendTime = now;
 
-        const msg = { type: 'MOVE', id: this.myId, pos: { x, y, z, rotY, moving } };
+        const msg = {
+            type: 'MOVE',
+            id: this.myId,
+            pos: {
+                x, y, z, rotY, moving,
+                characterId: GAME_STATE.selectedCharacterId,
+                roleId: GAME_STATE.selectedRole.id
+            }
+        };
         if (this.isHost) {
             this.guestConns.forEach(c => { if (c.open) c.send(msg); });
         } else if (this.hostConn && this.hostConn.open) {
