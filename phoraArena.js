@@ -84,7 +84,6 @@ function handleArenaKeyDown(e) {
         }
     }
 
-    // Interactuar con los paneles de la base con [E]
     if (key === 'e' && arenaStage === 'planet' && activePlanetTask && !activePlanetTask.completed && !isTaskModalOpen) {
         openPlanetTaskModal(activePlanetTask);
     }
@@ -238,7 +237,7 @@ function setupPlanetaryBaseStage() {
     arScene.background = new THREE.Color(mission.skyColor);
     arScene.fog = new THREE.Fog(mission.skyColor, 35, 95);
 
-    arScene.add(new THREE.AmbientLight(0xcbd5e1, 0.85));
+    arScene.add(new THREE.AmbientLight(0xcbd5e1, 0.9));
     const overheadLight = new THREE.DirectionalLight(0xffffff, 1.0);
     overheadLight.position.set(14, 28, 16);
     arScene.add(overheadLight);
@@ -440,8 +439,10 @@ function setupPlanetaryBaseStage() {
     });
 
     const myRole = GAME_STATE.selectedRole;
-    planetAstroRig = createDetailedAstronaut(myRole.colorHex, {
+    const myChar = GAME_DATA.characters.find(c => c.id === GAME_STATE.selectedCharacterId) || GAME_DATA.characters[0];
+    planetAstroRig = createBackyardiganCharacter(myChar.id, {
         name: MP.myName,
+        charName: myChar.name.split(' ')[0],
         roleShort: myRole.short,
         colorCss: myRole.colorCss
     });
@@ -462,24 +463,32 @@ function syncRemoteBaseAstronauts(time, dt) {
         if (p.id === MP.myId) return;
         activeIds.add(p.id);
 
-        if (!remoteBaseAstros[p.id]) {
+        const charId = p.characterId || 'uniqua';
+        if (!remoteBaseAstros[p.id] || remoteBaseAstros[p.id].charId !== charId) {
+            if (remoteBaseAstros[p.id]) {
+                arScene.remove(remoteBaseAstros[p.id].rig.group);
+            }
             const role = GAME_DATA.roles.find(r => r.id === p.roleId) || GAME_DATA.roles[0];
-            const rig = createDetailedAstronaut(role.colorHex, {
+            const char = GAME_DATA.characters.find(c => c.id === charId) || GAME_DATA.characters[1];
+            const rig = createBackyardiganCharacter(charId, {
                 name: p.name,
+                charName: char.name.split(' ')[0],
                 roleShort: role.short,
                 colorCss: role.colorCss
             });
             rig.group.position.set(p.x || 0, p.y || 0, p.z || 1.5);
             arScene.add(rig.group);
-            remoteBaseAstros[p.id] = rig;
+            remoteBaseAstros[p.id] = { rig, charId };
         }
 
-        const rig = remoteBaseAstros[p.id];
+        const rig = remoteBaseAstros[p.id].rig;
         rig.group.position.x += (p.x - rig.group.position.x) * 0.2;
         rig.group.position.y += ((p.y || 0) - rig.group.position.y) * 0.25;
         rig.group.position.z += (p.z - rig.group.position.z) * 0.2;
         resolveBaseWallCollisions(rig.group.position);
         rig.group.rotation.y = p.rotY || 0;
+
+        if (rig.propellerMesh) rig.propellerMesh.rotation.y += 0.25;
 
         if ((p.y || 0) > 0.1) {
             rig.leftArm.rotation.x = -0.6;
@@ -500,7 +509,7 @@ function syncRemoteBaseAstronauts(time, dt) {
 
     Object.keys(remoteBaseAstros).forEach(id => {
         if (!activeIds.has(id)) {
-            arScene.remove(remoteBaseAstros[id].group);
+            arScene.remove(remoteBaseAstros[id].rig.group);
             delete remoteBaseAstros[id];
         }
     });
@@ -533,6 +542,10 @@ function updatePlanetExploration(time, dt) {
 
     syncRemoteBaseAstronauts(time, dt);
     const astro = planetAstroRig.group;
+
+    if (planetAstroRig.propellerMesh) {
+        planetAstroRig.propellerMesh.rotation.y += 0.25;
+    }
 
     if (!isTaskModalOpen) {
         const isRunning = arKeys['shift'];
