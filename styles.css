@@ -149,7 +149,7 @@ kbd {
 .modal {
     position: fixed;
     inset: 0;
-    background: rgba(2, 6, 23, 0.78);
+    background: rgba(2, 6, 23, 0.8);
     backdrop-filter: blur(6px);
     display: flex;
     justify-content: center;
@@ -165,44 +165,72 @@ kbd {
     background: linear-gradient(145deg, #0f172a, #1e293b);
     border: 1.5px solid #38bdf8;
     border-radius: 18px;
-    width: 740px;
-    max-width: 95%;
-    max-height: 90vh;
+    width: 760px;
+    max-width: 96%;
+    max-height: 92vh;
     overflow-y: auto;
     padding: 22px;
     box-shadow: 0 20px 50px rgba(0, 0, 0, 0.75), 0 0 30px rgba(56, 189, 248, 0.25);
 }
 
 .modal-card.garage-wide {
-    width: 960px;
+    width: 1040px;
 }
 
 .lobby-card {
-    width: 820px;
+    width: 880px;
 }
 
 .lobby-grid {
     display: grid;
-    grid-template-columns: 1fr 1.15fr;
+    grid-template-columns: 1.1fr 1.1fr;
     gap: 22px;
 }
 
-@media (max-width: 760px) {
+@media (max-width: 780px) {
     .lobby-grid, .garage-layout {
         grid-template-columns: 1fr !important;
     }
 }
 
-/* Taller de Nave estilo GTA */
+.char-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.char-card {
+    background: rgba(15, 23, 42, 0.92);
+    border: 2px solid #334155;
+    border-radius: 10px;
+    padding: 8px 10px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: 0.15s;
+}
+
+.char-card:hover {
+    border-color: #38bdf8;
+}
+
+.char-card.selected {
+    border-color: #10b981;
+    background: rgba(16, 185, 129, 0.16);
+}
+
+/* Taller de Nave Modular estilo GTA */
 .garage-layout {
     display: grid;
-    grid-template-columns: 320px 1fr;
+    grid-template-columns: 330px 1fr;
     gap: 20px;
     align-items: start;
 }
 
 .garage-left {
-    background: rgba(9, 17, 34, 0.85);
+    background: rgba(9, 17, 34, 0.88);
     border: 1px solid #334155;
     border-radius: 14px;
     padding: 14px;
@@ -211,17 +239,29 @@ kbd {
 
 #ship-preview-canvas {
     width: 100%;
-    height: 240px;
+    height: 255px;
     border-radius: 10px;
     background: radial-gradient(circle at center, #1e293b 0%, #060b19 100%);
     border: 1px solid rgba(56, 189, 248, 0.35);
     cursor: grab;
     overflow: hidden;
-    margin-bottom: 12px;
+    margin-bottom: 10px;
 }
 
 #ship-preview-canvas:active {
     cursor: grabbing;
+}
+
+.equipped-summary {
+    text-align: left;
+    font-size: 0.74rem;
+    color: #94a3b8;
+    background: #0f172a;
+    border: 1px solid #1e293b;
+    border-radius: 8px;
+    padding: 8px 10px;
+    margin-bottom: 10px;
+    line-height: 1.45;
 }
 
 .garage-stats {
@@ -247,12 +287,12 @@ kbd {
 }
 
 .garage-tab-btn {
-    padding: 8px 12px;
+    padding: 7px 10px;
     border-radius: 8px;
     background: #0f172a;
     border: 1px solid #334155;
     color: #cbd5e1;
-    font-size: 0.82rem;
+    font-size: 0.78rem;
     font-weight: 700;
     cursor: pointer;
     transition: 0.15s;
@@ -273,7 +313,7 @@ kbd {
     margin-top: 6px;
     padding: 3px 8px;
     border-radius: 6px;
-    font-size: 0.76rem;
+    font-size: 0.75rem;
     font-weight: 800;
 }
 
@@ -307,13 +347,13 @@ kbd {
 
 .text-input {
     width: 100%;
-    padding: 10px 14px;
+    padding: 9px 12px;
     border-radius: 10px;
     background: #091122;
     border: 1.5px solid #334155;
     color: #f8fafc;
-    font-size: 0.95rem;
-    margin-bottom: 12px;
+    font-size: 0.92rem;
+    margin-bottom: 10px;
     outline: none;
 }
 
@@ -331,14 +371,14 @@ kbd {
 .role-mini-grid {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 6px;
 }
 
 .role-mini-item {
     background: rgba(15, 23, 42, 0.9);
     border: 2px solid #334155;
     border-radius: 10px;
-    padding: 9px 12px;
+    padding: 7px 11px;
     cursor: pointer;
     display: flex;
     align-items: center;
@@ -466,12 +506,12 @@ kbd {
     align-items: center;
     border-bottom: 1px solid rgba(148, 163, 184, 0.2);
     padding-bottom: 12px;
-    margin-bottom: 16px;
+    margin-bottom: 14px;
 }
 
 .modal-header h2 {
     color: #38bdf8;
-    font-size: 1.28rem;
+    font-size: 1.24rem;
 }
 
 .btn-close {
@@ -491,12 +531,12 @@ kbd {
 }
 
 .section-label {
-    font-size: 0.78rem;
+    font-size: 0.75rem;
     text-transform: uppercase;
     letter-spacing: 1.2px;
     color: #38bdf8;
     font-weight: 700;
-    margin: 8px 0 8px;
+    margin: 6px 0 6px;
 }
 
 .option-grid {
@@ -510,7 +550,7 @@ kbd {
     background: rgba(15, 23, 42, 0.92);
     border: 2px solid #334155;
     border-radius: 12px;
-    padding: 11px;
+    padding: 10px;
     cursor: pointer;
     text-align: left;
     transition: 0.2s;
@@ -530,14 +570,14 @@ kbd {
 .option-card h4 {
     color: #f8fafc;
     margin-bottom: 4px;
-    font-size: 0.92rem;
+    font-size: 0.9rem;
     display: flex;
     align-items: center;
     gap: 6px;
 }
 
 .option-card p {
-    font-size: 0.76rem;
+    font-size: 0.75rem;
     color: #94a3b8;
     line-height: 1.3;
 }
