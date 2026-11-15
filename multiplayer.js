@@ -11,6 +11,7 @@ function getPersistentClientId() {
     }
 }
 
+// Configuración STUN + TURN abierta para atravesar routers/NAT entre distintas casas y operadoras
 const PEER_ICE_CONFIG = {
     debug: 1,
     config: {
@@ -18,8 +19,29 @@ const PEER_ICE_CONFIG = {
             { urls: 'stun:stun.l.google.com:19302' },
             { urls: 'stun:stun1.l.google.com:19302' },
             { urls: 'stun:stun2.l.google.com:19302' },
-            { urls: 'stun:global.stun.twilio.com:3478' }
-        ]
+            { urls: 'stun:stun.relay.metered.ca:80' },
+            {
+                urls: 'turn:global.relay.metered.ca:80',
+                username: 'e8dd65b92f62d3e365b807c9',
+                credential: '3k712/61B681732k'
+            },
+            {
+                urls: 'turn:global.relay.metered.ca:80?transport=tcp',
+                username: 'e8dd65b92f62d3e365b807c9',
+                credential: '3k712/61B681732k'
+            },
+            {
+                urls: 'turn:global.relay.metered.ca:443',
+                username: 'e8dd65b92f62d3e365b807c9',
+                credential: '3k712/61B681732k'
+            },
+            {
+                urls: 'turns:global.relay.metered.ca:443?transport=tcp',
+                username: 'e8dd65b92f62d3e365b807c9',
+                credential: '3k712/61B681732k'
+            }
+        ],
+        iceCandidatePoolSize: 10
     }
 };
 
@@ -34,8 +56,8 @@ const MP = {
     hostConn: null,
     guestConns: [],
     players: {},
-    takenRolesByOthers: {}, // { roleId: playerName }
-    completedTasksByRole: {}, // { roleId: [taskId1, taskId2] }
+    takenRolesByOthers: {},
+    completedTasksByRole: {},
     lastSendTime: 0,
     lastHeartbeatTime: 0,
     lastPruneTime: 0,
@@ -168,7 +190,6 @@ const MP = {
             document.getElementById('lobby-modal').classList.remove('hidden');
         };
 
-        // Notificar inmediatamente si el jugador cierra la pestaña o recarga la página
         const notifyUnload = () => {
             const leaveMsg = { type: 'PLAYER_LEAVE', id: this.myId, name: this.myName };
             try {
@@ -268,7 +289,6 @@ const MP = {
     tickNetworkHealth() {
         const now = performance.now();
 
-        // Enviar latido constante incluso si el jugador está quieto
         if (now - this.lastHeartbeatTime >= 1100) {
             this.lastHeartbeatTime = now;
             const me = this.players[this.myId];
@@ -295,7 +315,6 @@ const MP = {
             }
         }
 
-        // Revisar cada 1s si algún jugador dejó de responder (> 4.5s sin señales)
         if (now - this.lastPruneTime >= 1000) {
             this.lastPruneTime = now;
             Object.values(this.players).forEach(p => {
@@ -359,10 +378,12 @@ const MP = {
         if (!grid) return;
         grid.innerHTML = GAME_DATA.characters.map(c => `
             <div class="char-card ${GAME_STATE.selectedCharacterId === c.id ? 'selected' : ''}" data-char="${c.id}">
-                <span class="color-swatch" style="background:${c.colorCss};"></span>
-                <div>
-                    <strong style="font-size:0.86rem; display:block;">${c.name}</strong>
-                    <span style="font-size:0.72rem; color:#94a3b8;">${c.species}</span>
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <span class="color-swatch" style="background:${c.colorCss};"></span>
+                    <div>
+                        <strong style="font-size:0.86rem; display:block;">${c.name}</strong>
+                        <span style="font-size:0.72rem; color:#94a3b8;">${c.species}</span>
+                    </div>
                 </div>
             </div>
         `).join('');
@@ -507,7 +528,7 @@ const MP = {
             const role = GAME_DATA.roles.find(r => r.id === p.roleId) || GAME_DATA.roles[0];
             const char = GAME_DATA.characters.find(c => c.id === p.characterId) || GAME_DATA.characters[0];
             return `
-                <div class="player-slot-row">
+                <div class="player-slot-row" style="cursor:default;">
                     <span><span class="color-swatch" style="background:${char.colorCss}; vertical-align:middle; margin-right:6px;"></span><strong>${p.name}</strong> <small style="color:#94a3b8;">(${char.shortName})</small></span>
                     <span style="color:${role.colorCss}; font-weight:600;">${role.short}</span>
                 </div>
@@ -528,12 +549,12 @@ const MP = {
             try { this.peer.destroy(); } catch (_) {}
         }
         const badge = document.getElementById('net-status-badge');
-        badge.innerText = '● Registrando sala...';
+        badge.innerText = '● Registrando sala en red global...';
 
         try {
             this.peer = new Peer('nasa-cubo-phora-' + this.roomCode, PEER_ICE_CONFIG);
             this.peer.on('open', () => {
-                badge.innerText = `● Sala Online #${this.roomCode} (Anfitrión)`;
+                badge.innerText = `● Sala Online #${this.roomCode} (Anfitrión Global)`;
             });
             this.peer.on('connection', conn => {
                 this.guestConns = this.guestConns.filter(c => c.open);
@@ -555,7 +576,7 @@ const MP = {
                     document.getElementById('generated-room-code').innerText = this.roomCode;
                     this.setupHostPeer();
                 } else {
-                    badge.innerText = '● Modo Local Activo';
+                    badge.innerText = '● Reintentando enlace global...';
                 }
             });
         } catch (_) {}
@@ -651,7 +672,7 @@ const MP = {
         if (typeof Peer === 'undefined') return;
         const feedback = document.getElementById('join-feedback');
         feedback.style.color = '#38bdf8';
-        feedback.innerText = `🔍 Verificando roles disponibles en sala #${code}...`;
+        feedback.innerText = `🔍 Verificando sala remota #${code}...`;
 
         const tempPeer = new Peer(PEER_ICE_CONFIG);
         const cleanup = () => { try { tempPeer.destroy(); } catch (_) {} };
@@ -667,14 +688,14 @@ const MP = {
                     this.renderLobbyRoles();
                     const freeCount = 4 - Object.keys(this.takenRolesByOthers).length;
                     feedback.style.color = '#10b981';
-                    feedback.innerText = `✓ Sala #${code} encontrada (${data.currentHumans}/${data.maxPlayers} jugadores). ${freeCount} roles libres marcados a la izquierda.`;
-                    setTimeout(cleanup, 300);
+                    feedback.innerText = `✓ Sala #${code} activa (${data.currentHumans}/${data.maxPlayers} jugadores). ${freeCount} roles libres.`;
+                    setTimeout(cleanup, 400);
                 }
             });
         });
         tempPeer.on('error', () => {
             feedback.style.color = '#fbbf24';
-            feedback.innerText = `⚠️ No se detectó la sala #${code} aún. Verifica el código con el anfitrión.`;
+            feedback.innerText = `⚠️ Buscando sala #${code}... Pulsa INGRESAR A LA SALA para forzar enlace.`;
             cleanup();
         });
     },
@@ -685,14 +706,14 @@ const MP = {
 
         if (typeof Peer === 'undefined') {
             feedback.style.color = '#ef4444';
-            feedback.innerText = '❌ Error cargando red. Recarga la página con Ctrl + Shift + R.';
+            feedback.innerText = '❌ Error cargando red. Recarga con Ctrl + Shift + R.';
             return;
         }
 
         btn.disabled = true;
-        btn.innerText = '⏳ CONECTANDO...';
+        btn.innerText = '⏳ ENLAZANDO RED...';
         feedback.style.color = '#38bdf8';
-        feedback.innerText = `⏳ Buscando sala #${code}...`;
+        feedback.innerText = `⏳ Conectando por red global (STUN/TURN) a sala #${code}...`;
 
         if (this.peer) {
             try { this.peer.destroy(); } catch (_) {}
@@ -704,9 +725,9 @@ const MP = {
                 btn.disabled = false;
                 btn.innerText = '🔗 INGRESAR A LA SALA';
                 feedback.style.color = '#fbbf24';
-                feedback.innerText = `⚠️ No se pudo conectar a #${code}. Verifica que el anfitrión tenga el juego abierto y el código sea exacto.`;
+                feedback.innerText = `⚠️ Tiempo de espera agotado para #${code}. Verifica que el anfitrión tenga la sala abierta e intenta de nuevo.`;
             }
-        }, 8500);
+        }, 12000);
 
         this.peer = new Peer(PEER_ICE_CONFIG);
 
@@ -716,14 +737,14 @@ const MP = {
             btn.innerText = '🔗 INGRESAR A LA SALA';
             feedback.style.color = '#ef4444';
             if (err && err.type === 'peer-unavailable') {
-                feedback.innerText = `❌ La sala #${code} no existe o el anfitrión cerró su pestaña.`;
+                feedback.innerText = `❌ La sala #${code} no se encuentra activa en este momento.`;
             } else {
-                feedback.innerText = `❌ Error de red (${err.type || 'conexión'}). Intenta nuevamente.`;
+                feedback.innerText = `❌ Error de enlace (${err.type || 'red'}). Intenta de nuevo.`;
             }
         });
 
         this.peer.on('open', () => {
-            feedback.innerText = `🔗 Enlazando con la nave #${code}...`;
+            feedback.innerText = `🔗 Estableciendo túnel directo con sala #${code}...`;
             const conn = this.peer.connect('nasa-cubo-phora-' + code, { reliable: true, serialization: 'json' });
             this.hostConn = conn;
 
@@ -755,7 +776,6 @@ const MP = {
                     this.maxPlayers = data.maxPlayers;
                     const myLocal = this.players[this.myId];
 
-                    // Detectar si algún jugador desapareció respecto a nuestro estado anterior
                     const prevIds = Object.keys(this.players);
                     const nextPlayers = data.players || {};
                     const now = performance.now();
@@ -848,7 +868,7 @@ const MP = {
                     this.maxPlayers = 1;
                     this.refreshTakenRolesFromPlayers();
                     this.renderPlayersList();
-                    this.showNetworkToast('⚠️ El anfitrión cerró la sala. Misiones desbloqueadas para modo individual.');
+                    this.showNetworkToast('⚠️ El anfitrión cerró la sala. Misiones desbloqueadas.');
                     if (typeof onRemoteTaskStateUpdated === 'function') {
                         onRemoteTaskStateUpdated();
                     }
@@ -928,8 +948,8 @@ const MP = {
             if (dist > 0.35) {
                 const angle = Math.atan2(dx, dz);
                 p.rotY = angle;
-                p.x += Math.sin(angle) * 0.055;
-                p.z += Math.cos(angle) * 0.055;
+                p.x += Math.sin(angle) * 0.04;
+                p.z += Math.cos(angle) * 0.04;
                 p.moving = true;
             } else {
                 p.moving = false;
