@@ -9,6 +9,7 @@ let activeStation = null;
 var ccKeys = {};
 let isModalOpen = false;
 let camYaw = 0;
+let camPitch = 0.28;
 let ccLastTime = 0;
 let lastPointerUnlockAt = 0;
 
@@ -75,7 +76,8 @@ function updatePointerLockStatusHint() {
     bar.classList.remove('hidden');
     const locked = !!document.pointerLockElement;
     bar.innerHTML = `
-        <span><kbd>WASD</kbd> / <kbd>Flechas</kbd> Moverse</span>
+        <span><kbd>WASD</kbd> Moverse</span>
+        <span><kbd>Ratón</kbd> Mirar (Arriba / Abajo / Lados)</span>
         <span><kbd>Espacio</kbd> Saltar</span>
         <span><kbd>Shift</kbd> Correr</span>
         <span><kbd>E</kbd> Interactuar</span>
@@ -91,10 +93,10 @@ function initControlCenter() {
 
     ccScene = new THREE.Scene();
     ccScene.background = new THREE.Color(0x060b19);
-    ccScene.fog = new THREE.Fog(0x060b19, 28, 70);
+    ccScene.fog = new THREE.Fog(0x060b19, 34, 85);
 
-    ccCamera = new THREE.PerspectiveCamera(55, container.clientWidth / container.clientHeight, 0.1, 120);
-    ccCamera.position.set(0, 8.5, 13.5);
+    ccCamera = new THREE.PerspectiveCamera(58, container.clientWidth / container.clientHeight, 0.1, 140);
+    ccCamera.position.set(0, 8.5, 16.5);
 
     ccRenderer = new THREE.WebGLRenderer({ antialias: true });
     ccRenderer.setSize(container.clientWidth, container.clientHeight);
@@ -104,17 +106,17 @@ function initControlCenter() {
     ccScene.add(new THREE.AmbientLight(0x94a3b8, 1.0));
 
     const mainLight = new THREE.DirectionalLight(0xe0f2fe, 1.15);
-    mainLight.position.set(8, 18, 10);
+    mainLight.position.set(10, 20, 12);
     mainLight.castShadow = true;
     ccScene.add(mainLight);
 
-    const cyanGlow = new THREE.PointLight(0x38bdf8, 1.5, 32);
-    cyanGlow.position.set(0, 6.5, -4);
+    const cyanGlow = new THREE.PointLight(0x38bdf8, 1.6, 42);
+    cyanGlow.position.set(0, 7.5, -5);
     ccScene.add(cyanGlow);
 
     buildControlRoom();
     updateWindowPlanet(GAME_STATE.currentOrbitId);
-    rebuildControlCenterAstronaut(new THREE.Vector3(0, 0, 4.5));
+    rebuildControlCenterAstronaut(new THREE.Vector3(0, 0, 5.5));
     buildStations();
     setupControlCenterEvents(container);
     updateCreditsHUD();
@@ -155,7 +157,7 @@ function rebuildControlCenterAstronaut(pos) {
 }
 
 function syncAllRemoteAstronauts(time, dt) {
-    MP.updateBots(dt, 6.5);
+    MP.updateBots(dt, 11.5);
 
     const activeIds = new Set();
     Object.values(MP.players).forEach(p => {
@@ -181,9 +183,9 @@ function syncAllRemoteAstronauts(time, dt) {
         }
 
         const rig = remoteCCAstros[p.id].rig;
-        rig.group.position.x += (p.x - rig.group.position.x) * 0.2;
+        rig.group.position.x += (p.x - rig.group.position.x) * 0.22;
         rig.group.position.y += ((p.y || 0) - rig.group.position.y) * 0.25;
-        rig.group.position.z += (p.z - rig.group.position.z) * 0.2;
+        rig.group.position.z += (p.z - rig.group.position.z) * 0.22;
         rig.group.rotation.y = p.rotY || 0;
 
         if (rig.propellerMesh) rig.propellerMesh.rotation.y += 0.25;
@@ -213,30 +215,31 @@ function syncAllRemoteAstronauts(time, dt) {
     });
 }
 
+// Mapa de la nave ampliado (36x34 unidades) para mayor comodidad multijugador
 function buildControlRoom() {
     const floor = new THREE.Mesh(
-        new THREE.PlaneGeometry(26, 24),
+        new THREE.PlaneGeometry(36, 34),
         new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.4, metalness: 0.3 })
     );
     floor.rotation.x = -Math.PI / 2;
     floor.receiveShadow = true;
     ccScene.add(floor);
 
-    const grid = new THREE.GridHelper(24, 24, 0x38bdf8, 0x1e293b);
+    const grid = new THREE.GridHelper(34, 34, 0x38bdf8, 0x1e293b);
     grid.position.y = 0.005;
     ccScene.add(grid);
 
     const walkway = new THREE.Mesh(
-        new THREE.PlaneGeometry(3.4, 22),
+        new THREE.PlaneGeometry(4.2, 32),
         new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.3 })
     );
     walkway.rotation.x = -Math.PI / 2;
     walkway.position.y = 0.01;
     ccScene.add(walkway);
 
-    [-1.7, 1.7].forEach(xPos => {
+    [-2.1, 2.1].forEach(xPos => {
         const line = new THREE.Mesh(
-            new THREE.PlaneGeometry(0.1, 22),
+            new THREE.PlaneGeometry(0.12, 32),
             new THREE.MeshBasicMaterial({ color: 0x38bdf8 })
         );
         line.rotation.x = -Math.PI / 2;
@@ -244,67 +247,67 @@ function buildControlRoom() {
         ccScene.add(line);
     });
 
-    [-12.5, 12.5].forEach(xWall => {
+    [-17.5, 17.5].forEach(xWall => {
         const wall = new THREE.Mesh(
-            new THREE.BoxGeometry(1.0, 9.5, 24),
+            new THREE.BoxGeometry(1.0, 11.0, 34),
             new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.5 })
         );
-        wall.position.set(xWall, 4.75, 0);
+        wall.position.set(xWall, 5.5, 0);
         ccScene.add(wall);
 
-        for (let z = -8; z <= 8; z += 5.5) {
+        for (let z = -11; z <= 11; z += 7.2) {
             const panel = new THREE.Mesh(
-                new THREE.BoxGeometry(1.1, 3.2, 2.8),
+                new THREE.BoxGeometry(1.1, 3.6, 3.4),
                 new THREE.MeshStandardMaterial({ color: 0x0284c7, emissive: 0x0369a1, emissiveIntensity: 0.45 })
             );
-            panel.position.set(xWall > 0 ? xWall - 0.1 : xWall + 0.1, 3.4, z);
+            panel.position.set(xWall > 0 ? xWall - 0.1 : xWall + 0.1, 3.8, z);
             ccScene.add(panel);
         }
     });
 
     const frontWall = new THREE.Mesh(
-        new THREE.BoxGeometry(26, 9.5, 1.0),
+        new THREE.BoxGeometry(36, 11.0, 1.0),
         new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.5 })
     );
-    frontWall.position.set(0, 4.75, 11.8);
+    frontWall.position.set(0, 5.5, 16.8);
     ccScene.add(frontWall);
 
     const ceiling = new THREE.Mesh(
-        new THREE.BoxGeometry(26, 0.6, 24),
+        new THREE.BoxGeometry(36, 0.6, 34),
         new THREE.MeshStandardMaterial({ color: 0x0b1324, roughness: 0.6 })
     );
-    ceiling.position.set(0, 9.6, 0);
+    ceiling.position.set(0, 11.2, 0);
     ccScene.add(ceiling);
 
     const backWallBottom = new THREE.Mesh(
-        new THREE.BoxGeometry(26, 2.2, 0.9),
+        new THREE.BoxGeometry(36, 2.4, 0.9),
         new THREE.MeshStandardMaterial({ color: 0x1e293b })
     );
-    backWallBottom.position.set(0, 1.1, -11.5);
+    backWallBottom.position.set(0, 1.2, -16.5);
     ccScene.add(backWallBottom);
 
     const backWallTop = new THREE.Mesh(
-        new THREE.BoxGeometry(26, 1.6, 0.9),
+        new THREE.BoxGeometry(36, 1.8, 0.9),
         new THREE.MeshStandardMaterial({ color: 0x1e293b })
     );
-    backWallTop.position.set(0, 8.7, -11.5);
+    backWallTop.position.set(0, 10.2, -16.5);
     ccScene.add(backWallTop);
 
     const windowFrame = new THREE.Mesh(
-        new THREE.BoxGeometry(24, 0.25, 1.05),
+        new THREE.BoxGeometry(34, 0.28, 1.05),
         new THREE.MeshBasicMaterial({ color: 0x38bdf8 })
     );
-    windowFrame.position.set(0, 2.2, -11.5);
+    windowFrame.position.set(0, 2.4, -16.5);
     ccScene.add(windowFrame);
 
     const topFrame = windowFrame.clone();
-    topFrame.position.set(0, 7.9, -11.5);
+    topFrame.position.set(0, 9.3, -16.5);
     ccScene.add(topFrame);
 
     const starGeo = new THREE.BufferGeometry();
     const starVertices = [];
-    for (let i = 0; i < 450; i++) {
-        starVertices.push((Math.random() - 0.5) * 90, Math.random() * 35 + 1, -14 - Math.random() * 40);
+    for (let i = 0; i < 550; i++) {
+        starVertices.push((Math.random() - 0.5) * 110, Math.random() * 42 + 1, -19 - Math.random() * 45);
     }
     starGeo.setAttribute('position', new THREE.Float32BufferAttribute(starVertices, 3));
     ccScene.add(new THREE.Points(starGeo, new THREE.PointsMaterial({ color: 0xffffff, size: 0.25 })));
@@ -316,8 +319,8 @@ function updateWindowPlanet(planetId) {
         ccScene.remove(windowPlanet.group);
     }
     const targetId = planetId || 'earth';
-    windowPlanet = createHDPlanet(targetId, 14);
-    windowPlanet.group.position.set(0, 4.5, -36);
+    windowPlanet = createHDPlanet(targetId, 16);
+    windowPlanet.group.position.set(0, 5.2, -43);
     ccScene.add(windowPlanet.group);
 
     const orbitLabel = document.getElementById('orbit-location-label');
@@ -364,8 +367,8 @@ function buildStations() {
             id: 'planet',
             name: '1. Mapa Estelar y Destino',
             label: 'PANEL 1: DESTINO',
-            x: -6.8,
-            z: -5.2,
+            x: -9.5,
+            z: -7.2,
             color: 0x38bdf8,
             cssColor: '#38bdf8'
         },
@@ -373,8 +376,8 @@ function buildStations() {
             id: 'garage',
             name: '2. Taller de Nave Espacial',
             label: 'PANEL 2: TALLER NAVE',
-            x: 6.8,
-            z: -5.2,
+            x: 9.5,
+            z: -7.2,
             color: 0xf59e0b,
             cssColor: '#f59e0b'
         },
@@ -382,8 +385,8 @@ function buildStations() {
             id: 'protocol',
             name: '3. Protocolo EVA y Rol',
             label: 'PANEL 3: TRAJE Y ROL',
-            x: -6.8,
-            z: 3.6,
+            x: -9.5,
+            z: 5.2,
             color: 0xa855f7,
             cssColor: '#a855f7'
         },
@@ -391,8 +394,8 @@ function buildStations() {
             id: 'launch',
             name: '4. Consola de Ignición y Despliegue',
             label: 'PANEL 4: DESPLEGAR',
-            x: 6.8,
-            z: 3.6,
+            x: 9.5,
+            z: 5.2,
             color: 0x10b981,
             cssColor: '#10b981'
         }
@@ -450,15 +453,20 @@ function setupControlCenterEvents(container) {
         updatePointerLockStatusHint();
     });
 
-    // Sensibilidad de cámara suave (0.0014) para evitar giros bruscos
+    // Movimiento libre de cámara: horizontal (Yaw) y vertical arriba/abajo (Pitch)
     window.addEventListener('mousemove', e => {
         if (!document.pointerLockElement || isAnyGameModalOpen()) return;
         const dx = Math.max(-60, Math.min(60, e.movementX || 0));
+        const dy = Math.max(-60, Math.min(60, e.movementY || 0));
         const ccHidden = document.getElementById('control-center-container').classList.contains('hidden');
         if (!ccHidden) {
-            camYaw -= dx * 0.0014;
+            camYaw -= dx * 0.0016;
+            camPitch = Math.max(-0.42, Math.min(0.88, camPitch + dy * 0.0016));
         } else if (typeof arenaPhase !== 'undefined' && arenaPhase === 'base_ops') {
-            baseCamYaw -= dx * 0.0014;
+            baseCamYaw -= dx * 0.0016;
+            if (typeof baseCamPitch !== 'undefined') {
+                baseCamPitch = Math.max(-0.38, Math.min(0.85, baseCamPitch + dy * 0.0016));
+            }
         }
     });
 
@@ -510,6 +518,14 @@ function setupControlCenterEvents(container) {
     };
 
     document.getElementById('close-modal-btn').onclick = closeConsoleModal;
+
+    const backLobbyBtn = document.getElementById('cc-back-lobby-btn');
+    if (backLobbyBtn) {
+        backLobbyBtn.onclick = () => {
+            if (isModalOpen) closeConsoleModal();
+            MP.leaveCurrentRoom(false);
+        };
+    }
 
     window.addEventListener('resize', () => {
         if (!ccRenderer || !ccCamera) return;
@@ -976,7 +992,7 @@ function animateControlCenter(now) {
             if (ccKeys['KeyA'] || ccKeys['ArrowLeft']) strafe -= 1;
             if (ccKeys['KeyD'] || ccKeys['ArrowRight']) strafe += 1;
 
-            const speed = (ccKeys['ShiftLeft'] || ccKeys['ShiftRight']) ? 0.11 : 0.07;
+            const speed = (ccKeys['ShiftLeft'] || ccKeys['ShiftRight']) ? 0.13 : 0.08;
             if (forward !== 0 || strafe !== 0) {
                 moving = true;
                 const sinY = Math.sin(camYaw);
@@ -991,8 +1007,9 @@ function animateControlCenter(now) {
             }
         }
 
-        astroRig.group.position.x = Math.max(-10.8, Math.min(10.8, astroRig.group.position.x));
-        astroRig.group.position.z = Math.max(-9.6, Math.min(10.2, astroRig.group.position.z));
+        // Límites ampliados del Centro de Control
+        astroRig.group.position.x = Math.max(-15.4, Math.min(15.4, astroRig.group.position.x));
+        astroRig.group.position.z = Math.max(-14.2, Math.min(14.8, astroRig.group.position.z));
 
         if (!astroGrounded) {
             astroRig.group.position.y += astroVelY;
@@ -1031,7 +1048,7 @@ function animateControlCenter(now) {
         );
 
         let nearest = null;
-        let minDist = 3.1;
+        let minDist = 3.3;
         stations.forEach(st => {
             const d = Math.hypot(astroRig.group.position.x - st.x, astroRig.group.position.z - st.z);
             if (d < minDist) {
@@ -1048,12 +1065,16 @@ function animateControlCenter(now) {
             promptBtn.classList.add('hidden');
         }
 
-        const camDist = 7.4;
-        const rawCamX = astroRig.group.position.x + Math.sin(camYaw) * camDist;
-        const rawCamZ = astroRig.group.position.z + Math.cos(camYaw) * camDist;
-        ccCamera.position.x = Math.max(-11.2, Math.min(11.2, rawCamX));
-        ccCamera.position.z = Math.max(-10.2, Math.min(10.8, rawCamZ));
-        ccCamera.position.y = Math.min(8.2, astroRig.group.position.y + 4.2);
+        // Cámara con rotación horizontal (camYaw) y vertical arriba/abajo (camPitch)
+        const camDist = 8.2;
+        const horizDist = Math.cos(camPitch) * camDist;
+        const rawCamX = astroRig.group.position.x + Math.sin(camYaw) * horizDist;
+        const rawCamZ = astroRig.group.position.z + Math.cos(camYaw) * horizDist;
+        const rawCamY = astroRig.group.position.y + 2.2 + Math.sin(camPitch) * camDist;
+
+        ccCamera.position.x = Math.max(-16.2, Math.min(16.2, rawCamX));
+        ccCamera.position.z = Math.max(-15.2, Math.min(15.6, rawCamZ));
+        ccCamera.position.y = Math.max(1.2, Math.min(10.2, rawCamY));
         ccCamera.lookAt(astroRig.group.position.x, astroRig.group.position.y + 1.8, astroRig.group.position.z);
     }
 
