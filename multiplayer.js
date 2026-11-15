@@ -55,6 +55,7 @@ const MP = {
     myName: 'Pablo',
     fillWithBots: false,
     peer: null,
+    peekPeer: null,
     hostConn: null,
     guestConns: [],
     players: {},
@@ -65,7 +66,9 @@ const MP = {
     lastPruneTime: 0,
     lastPeekedCode: '',
     hostSyncInterval: null,
+    heartbeatInterval: null,
     voluntaryLeave: false,
+    onPunchCallback: null,
 
     initLobbyUI() {
         const initChar = GAME_DATA.characters.find(c => c.id === GAME_STATE.selectedCharacterId) || GAME_DATA.characters[0];
@@ -79,6 +82,7 @@ const MP = {
         this.renderLobbyCharacters();
         this.renderLobbyRoles();
         this.setupHostPeer();
+        this.startNetworkHeartbeatLoop();
         this.syncLocalPlayerEntry();
         this.rebuildBotSlots();
         this.renderPlayersList();
@@ -119,6 +123,7 @@ const MP = {
 
         document.getElementById('tab-join-btn').onclick = () => {
             this.stopHostSyncLoop();
+            this.destroyPeekPeer();
             this.isHost = false;
             this.takenRolesByOthers = {};
             this.lastPeekedCode = '';
@@ -149,6 +154,7 @@ const MP = {
                 this.lastPeekedCode = clean;
                 this.peekRemoteRoomRoles(clean);
             } else if (clean.length < 4) {
+                this.destroyPeekPeer();
                 this.lastPeekedCode = '';
                 this.takenRolesByOthers = {};
                 this.renderLobbyRoles();
@@ -186,10 +192,11 @@ const MP = {
             const leaveMsg = { type: 'PLAYER_LEAVE', id: this.myId, name: this.myName };
             try {
                 if (this.isHost) {
-                    this.guestConns.forEach(c => { if (c.open) c.send(leaveMsg); });
+                    this.guestConns.forEach(c => { if (c && c.open) c.send(leaveMsg); });
                 } else if (this.hostConn && this.hostConn.open) {
                     this.hostConn.send(leaveMsg);
                 }
+                this.destroyPeekPeer();
                 if (this.peer) this.peer.destroy();
             } catch (_) {}
         };
@@ -197,7 +204,22 @@ const MP = {
         window.addEventListener('pagehide', notifyUnload);
     },
 
+    destroyPeekPeer() {
+        if (this.peekPeer) {
+            try {
+                if (!this.peekPeer.destroyed) this.peekPeer.destroy();
+            } catch (_) {}
+            this.peekPeer = null;
+        }
+    },
+
+    isMissionCurrentlyRunning() {
+        const arenaEl = document.getElementById('arena-container');
+        return Boolean(arenaEl && !arenaEl.classList.contains('hidden'));
+    },
+
     switchToCreateRoomTab(generateNewCode) {
+        this.destroyPeekPeer();
         this.isHost = true;
         this.takenRolesByOthers = {};
         this.lastPeekedCode = '';
@@ -223,6 +245,7 @@ const MP = {
     leaveCurrentRoom(isHostDisconnect = false) {
         this.voluntaryLeave = true;
         this.stopHostSyncLoop();
+        this.destroyPeekPeer();
 
         const leaveMsg = { type: 'PLAYER_LEAVE', id: this.myId, name: this.myName };
         try {
@@ -230,7 +253,7 @@ const MP = {
                 this.hostConn.send(leaveMsg);
             }
             this.guestConns.forEach(c => {
-                try { c.close(); } catch (_) {}
+                try { if (c) c.close(); } catch (_) {}
             });
             if (this.hostConn) {
                 try { this.hostConn.close(); } catch (_) {}
@@ -357,7 +380,9 @@ const MP = {
                 moving: false,
                 targetX: departing.x || 0,
                 targetZ: departing.z || 2.5,
-                waitTimer: 1.5
+                waitTimer: 1.5,
+                kbX: 0,
+                kbZ: 0
             };
         }
 
@@ -382,6 +407,13 @@ const MP = {
         this.stopHostSyncLoop();
         this.hostSyncInterval = setInterval(() => {
             if (!this.isHost) return;
+            // Limpiar únicamente conexiones ya destruidas/cerradas, nunca las que están conectando
+            this.guestConns = this.guestConns.filter(c => {
+                if (!c) return false;
+                const pcState = c.peerConnection ? c.peerConnection.connectionState : '';
+                return pcState !== 'closed' && pcState !== 'failed';
+            });
+
             const activeConns = this.guestConns.filter(c => c && c.open);
             if (activeConns.length === 0) return;
 
@@ -390,6 +422,7 @@ const MP = {
                 maxPlayers: this.maxPlayers,
                 players: this.players,
                 missionId: GAME_STATE.selectedMission.id,
+                missionStarted: this.isMissionCurrentlyRunning(),
                 completedTasksByRole: this.completedTasksByRole,
                 credits: GAME_STATE.credits,
                 arenaState: {
@@ -412,13 +445,29 @@ const MP = {
         }
     },
 
-    tickNetworkHealth() {
+    // Bucle de latidos independiente de requestAnimationFrame (evita desconexiones al cambiar de pestaña)
+    startNetworkHeartbeatLoop() {
+        this.stopNetworkHeartbeatLoop();
+        this.heartbeatInterval = setInterval(() => {
+            this.tickNetworkHealth(true);
+        }, 1000);
+    },
+
+    stopNetworkHeartbeatLoop() {
+        if (this.heartbeatInterval) {
+            clearInterval(this.heartbeatInterval);
+            this.heartbeatInterval = null;
+        }
+    },
+
+    tickNetworkHealth(fromInterval = false) {
         const now = performance.now();
 
-        if (now - this.lastHeartbeatTime >= 1100) {
+        if (fromInterval || now - this.lastHeartbeatTime >= 1000) {
             this.lastHeartbeatTime = now;
             const me = this.players[this.myId];
             if (me) {
+                me.lastSeen = now;
                 const hb = {
                     type: 'HEARTBEAT',
                     id: this.myId,
@@ -434,18 +483,23 @@ const MP = {
                     }
                 };
                 if (this.isHost) {
-                    this.guestConns.forEach(c => { if (c.open) c.send(hb); });
+                    this.guestConns.forEach(c => {
+                        if (c && c.open) {
+                            try { c.send(hb); } catch (_) {}
+                        }
+                    });
                 } else if (this.hostConn && this.hostConn.open) {
-                    this.hostConn.send(hb);
+                    try { this.hostConn.send(hb); } catch (_) {}
                 }
             }
         }
 
-        if (this.isHost && now - this.lastPruneTime >= 1200) {
+        if (this.isHost && now - this.lastPruneTime >= 2000) {
             this.lastPruneTime = now;
             Object.values(this.players).forEach(p => {
                 if (p.id === this.myId || p.isBot) return;
-                if (p.lastSeen && (now - p.lastSeen > 5500)) {
+                // 15 segundos de tolerancia para conexiones WebRTC/TURN o cambios de pestaña
+                if (p.lastSeen && (now - p.lastSeen > 15000)) {
                     this.handlePlayerRemoved(p.id);
                 }
             });
@@ -485,7 +539,9 @@ const MP = {
             completedTasksByRole: this.completedTasksByRole
         };
         this.guestConns.forEach(c => {
-            if (c.open) c.send(payload);
+            if (c && c.open) {
+                try { c.send(payload); } catch (_) {}
+            }
         });
     },
 
@@ -641,7 +697,9 @@ const MP = {
                 moving: false,
                 targetX: spot.x,
                 targetZ: spot.z,
-                waitTimer: 1.5 + Math.random() * 2.5
+                waitTimer: 1.5 + Math.random() * 2.5,
+                kbX: 0,
+                kbZ: 0
             };
         }
     },
@@ -674,6 +732,7 @@ const MP = {
     setupHostPeer() {
         if (typeof Peer === 'undefined') return;
         this.stopHostSyncLoop();
+        this.guestConns = [];
         if (this.peer) {
             try { this.peer.destroy(); } catch (_) {}
         }
@@ -687,8 +746,10 @@ const MP = {
                 this.startHostSyncLoop();
             });
             this.peer.on('connection', conn => {
-                this.guestConns = this.guestConns.filter(c => c.open);
+                // No filtrar conexiones en negociación (c.open === false), solo evitar duplicados exactos
+                this.guestConns = this.guestConns.filter(c => c && c !== conn);
                 this.guestConns.push(conn);
+
                 conn.on('data', data => this.handleHostData(conn, data));
                 conn.on('close', () => {
                     this.guestConns = this.guestConns.filter(c => c !== conn);
@@ -696,9 +757,14 @@ const MP = {
                         this.handlePlayerRemoved(conn.peerPlayerId);
                     }
                 });
+                conn.on('error', () => {
+                    this.guestConns = this.guestConns.filter(c => c !== conn);
+                });
             });
             this.peer.on('disconnected', () => {
-                try { this.peer.reconnect(); } catch (_) {}
+                try {
+                    if (this.peer && !this.peer.destroyed) this.peer.reconnect();
+                } catch (_) {}
             });
             this.peer.on('error', err => {
                 if (err && err.type === 'unavailable-id') {
@@ -724,15 +790,21 @@ const MP = {
             });
             const humanCount = Object.values(this.players).filter(p => !p.isBot).length;
             if (conn.open) {
-                conn.send({
-                    type: 'PEEK_RESULT',
-                    takenRoles,
-                    maxPlayers: this.maxPlayers,
-                    currentHumans: humanCount
-                });
+                try {
+                    conn.send({
+                        type: 'PEEK_RESULT',
+                        takenRoles,
+                        maxPlayers: this.maxPlayers,
+                        currentHumans: humanCount
+                    });
+                } catch (_) {}
             }
 
         } else if (data.type === 'JOIN') {
+            if (!this.guestConns.includes(conn)) {
+                this.guestConns.push(conn);
+            }
+
             const incomingId = data.player.id;
 
             if (conn.peerPlayerId && conn.peerPlayerId !== incomingId) {
@@ -741,7 +813,9 @@ const MP = {
 
             const existingHumans = Object.values(this.players).filter(p => !p.isBot && p.id !== incomingId);
             if (existingHumans.length >= this.maxPlayers) {
-                if (conn.open) conn.send({ type: 'ROOM_FULL', maxPlayers: this.maxPlayers });
+                if (conn.open) {
+                    try { conn.send({ type: 'ROOM_FULL', maxPlayers: this.maxPlayers }); } catch (_) {}
+                }
                 return;
             }
 
@@ -756,6 +830,7 @@ const MP = {
                 if (availableRole) finalRoleId = availableRole.id;
             }
 
+            const isRejoinSamePlayer = Boolean(this.players[incomingId]);
             conn.peerPlayerId = incomingId;
             this.players[incomingId] = {
                 ...data.player,
@@ -768,18 +843,26 @@ const MP = {
             this.rebuildBotSlots();
             this.renderLobbyRoles();
             this.renderPlayersList();
-            this.showNetworkToast(`🛰️ ${data.player.name} se unió a la tripulación.`, false);
+            if (!isRejoinSamePlayer) {
+                this.showNetworkToast(`🛰️ ${data.player.name} se unió a la tripulación.`, false);
+            }
 
             const welcomePayload = {
                 type: 'ROOM_STATE',
                 maxPlayers: this.maxPlayers,
                 players: this.players,
-                missionId: GAME_STATE.selectedMission.id
+                missionId: GAME_STATE.selectedMission.id,
+                missionStarted: this.isMissionCurrentlyRunning()
             };
-            if (conn.open) conn.send(welcomePayload);
+            if (conn.open) {
+                try { conn.send(welcomePayload); } catch (_) {}
+            }
             this.broadcastRoomState();
 
         } else if (data.type === 'MOVE' || data.type === 'HEARTBEAT') {
+            if (!this.guestConns.includes(conn)) {
+                this.guestConns.push(conn);
+            }
             if (this.players[data.id]) {
                 Object.assign(this.players[data.id], data.pos, { lastSeen: performance.now() });
                 this.refreshTakenRolesFromPlayers();
@@ -796,35 +879,129 @@ const MP = {
             if (typeof onRemoteTaskStateUpdated === 'function') {
                 onRemoteTaskStateUpdated();
             }
+
+        } else if (data.type === 'PUNCH_HIT') {
+            const attacker = this.players[data.attackerId];
+            const target = this.players[data.targetId];
+            if (!attacker || !target) return;
+
+            if (target.isBot) {
+                target.kbX = (data.kx || 0) * 0.34;
+                target.kbZ = (data.kz || 0) * 0.34;
+            }
+
+            const punchEvent = {
+                type: 'PLAYER_PUNCHED',
+                attackerId: attacker.id,
+                attackerName: attacker.name,
+                targetId: target.id,
+                targetName: target.name,
+                kx: data.kx || 0,
+                kz: data.kz || 0
+            };
+
+            this.guestConns.forEach(c => {
+                if (c && c.open) {
+                    try { c.send(punchEvent); } catch (_) {}
+                }
+            });
+
+            if (typeof this.onPunchCallback === 'function') {
+                this.onPunchCallback(punchEvent);
+            }
+        }
+    },
+
+    // Enviar golpe amistoso entre participantes (funciona tanto si eres anfitrión como invitado)
+    sendPunch(targetId, kx, kz) {
+        const target = this.players[targetId];
+        if (!target) return;
+
+        if (this.isHost) {
+            if (target.isBot) {
+                target.kbX = (kx || 0) * 0.34;
+                target.kbZ = (kz || 0) * 0.34;
+            }
+
+            const punchEvent = {
+                type: 'PLAYER_PUNCHED',
+                attackerId: this.myId,
+                attackerName: this.myName,
+                targetId: target.id,
+                targetName: target.name,
+                kx: kx || 0,
+                kz: kz || 0
+            };
+
+            this.guestConns.forEach(c => {
+                if (c && c.open) {
+                    try { c.send(punchEvent); } catch (_) {}
+                }
+            });
+
+            if (typeof this.onPunchCallback === 'function') {
+                this.onPunchCallback(punchEvent);
+            }
+        } else if (this.hostConn && this.hostConn.open) {
+            try {
+                this.hostConn.send({
+                    type: 'PUNCH_HIT',
+                    attackerId: this.myId,
+                    attackerName: this.myName,
+                    targetId,
+                    kx: kx || 0,
+                    kz: kz || 0
+                });
+            } catch (_) {}
         }
     },
 
     peekRemoteRoomRoles(code) {
         if (typeof Peer === 'undefined') return;
+        this.destroyPeekPeer();
+
         const feedback = document.getElementById('join-feedback');
         feedback.style.color = '#38bdf8';
         feedback.innerText = `🔍 Verificando sala remota #${code}...`;
 
         const tempPeer = new Peer(PEER_ICE_CONFIG);
-        const cleanup = () => { try { tempPeer.destroy(); } catch (_) {} };
+        this.peekPeer = tempPeer;
+
+        const cleanup = () => {
+            if (this.peekPeer === tempPeer) {
+                this.peekPeer = null;
+            }
+            try {
+                if (!tempPeer.destroyed) tempPeer.destroy();
+            } catch (_) {}
+        };
+
+        const peekSafetyTimer = setTimeout(cleanup, 5000);
 
         tempPeer.on('open', () => {
+            if (tempPeer.destroyed) return;
             const conn = tempPeer.connect(PREFIJO_SALA + code, { reliable: true, serialization: 'json' });
             conn.on('open', () => {
-                conn.send({ type: 'PEEK_ROOM', requesterId: this.myId });
+                try { conn.send({ type: 'PEEK_ROOM', requesterId: this.myId }); } catch (_) {}
             });
             conn.on('data', data => {
                 if (data && data.type === 'PEEK_RESULT') {
+                    clearTimeout(peekSafetyTimer);
                     this.takenRolesByOthers = data.takenRoles || {};
                     this.renderLobbyRoles();
                     const freeCount = 4 - Object.keys(this.takenRolesByOthers).length;
                     feedback.style.color = '#10b981';
                     feedback.innerText = `✓ Sala #${code} activa (${data.currentHumans}/${data.maxPlayers} jugadores). ${freeCount} roles libres.`;
-                    setTimeout(cleanup, 400);
+                    setTimeout(cleanup, 250);
                 }
+            });
+            conn.on('error', () => {
+                clearTimeout(peekSafetyTimer);
+                cleanup();
             });
         });
         tempPeer.on('error', () => {
+            clearTimeout(peekSafetyTimer);
             feedback.style.color = '#fbbf24';
             feedback.innerText = `⚠️ Buscando sala #${code}... Pulsa INGRESAR A LA SALA para conectar.`;
             cleanup();
@@ -878,6 +1055,8 @@ const MP = {
         }
 
         this.stopHostSyncLoop();
+        this.destroyPeekPeer();
+
         btn.disabled = true;
         btn.innerText = '⏳ ENLAZANDO RED...';
         feedback.style.color = '#38bdf8';
@@ -888,19 +1067,29 @@ const MP = {
         }
 
         let joinedOk = false;
+        let joinRetryTimer = null;
+
         const failTimeout = setTimeout(() => {
+            if (joinRetryTimer) clearInterval(joinRetryTimer);
             if (!joinedOk) {
                 btn.disabled = false;
                 btn.innerText = '🔗 INGRESAR A LA SALA';
                 feedback.style.color = '#fbbf24';
                 feedback.innerText = `⚠️ Tiempo de espera agotado para #${code}. Verifica el código e intenta de nuevo.`;
             }
-        }, 12000);
+        }, 15000);
 
         this.peer = new Peer(PEER_ICE_CONFIG);
 
+        this.peer.on('disconnected', () => {
+            try {
+                if (this.peer && !this.peer.destroyed) this.peer.reconnect();
+            } catch (_) {}
+        });
+
         this.peer.on('error', err => {
             clearTimeout(failTimeout);
+            if (joinRetryTimer) clearInterval(joinRetryTimer);
             btn.disabled = false;
             btn.innerText = '🔗 INGRESAR A LA SALA';
             feedback.style.color = '#ef4444';
@@ -916,11 +1105,36 @@ const MP = {
             const conn = this.peer.connect(PREFIJO_SALA + code, { reliable: true, serialization: 'json' });
             this.hostConn = conn;
 
-            conn.on('open', () => {
+            const sendJoinPacket = () => {
+                if (!conn.open || joinedOk) return;
                 this.roomCode = code;
                 this.players = {};
                 this.syncLocalPlayerEntry();
-                conn.send({ type: 'JOIN', player: this.players[this.myId] });
+                try {
+                    conn.send({ type: 'JOIN', player: this.players[this.myId] });
+                } catch (_) {}
+            };
+
+            conn.on('open', () => {
+                sendJoinPacket();
+                joinRetryTimer = setInterval(() => {
+                    if (joinedOk || !conn.open) {
+                        clearInterval(joinRetryTimer);
+                        return;
+                    }
+                    sendJoinPacket();
+                }, 1300);
+            });
+
+            conn.on('error', () => {
+                if (!joinedOk) {
+                    clearTimeout(failTimeout);
+                    if (joinRetryTimer) clearInterval(joinRetryTimer);
+                    btn.disabled = false;
+                    btn.innerText = '🔗 INGRESAR A LA SALA';
+                    feedback.style.color = '#ef4444';
+                    feedback.innerText = `❌ No se pudo abrir el canal WebRTC con #${code}. Reintenta.`;
+                }
             });
 
             conn.on('data', data => {
@@ -929,6 +1143,7 @@ const MP = {
                 if (data.type === 'ROOM_FULL') {
                     joinedOk = true;
                     clearTimeout(failTimeout);
+                    if (joinRetryTimer) clearInterval(joinRetryTimer);
                     btn.disabled = false;
                     btn.innerText = '🔗 INGRESAR A LA SALA';
                     feedback.style.color = '#fbbf24';
@@ -936,8 +1151,10 @@ const MP = {
                     try { conn.close(); } catch (_) {}
 
                 } else if (data.type === 'ROOM_STATE') {
+                    const wasFirstJoin = !joinedOk;
                     joinedOk = true;
                     clearTimeout(failTimeout);
+                    if (joinRetryTimer) clearInterval(joinRetryTimer);
                     btn.disabled = false;
                     btn.innerText = '🔗 INGRESAR A LA SALA';
 
@@ -967,6 +1184,15 @@ const MP = {
                     this.updateHudBadge();
                     const badge = document.getElementById('net-status-badge');
                     if (badge) badge.innerText = `● Conectado a Sala #${this.roomCode}`;
+
+                    if (wasFirstJoin && data.missionStarted && !this.isMissionCurrentlyRunning()) {
+                        this.resetMissionTaskState();
+                        if (typeof beginMissionLaunch === 'function') {
+                            beginMissionLaunch(true);
+                            return;
+                        }
+                    }
+
                     if (typeof lockGamePointer === 'function') lockGamePointer();
 
                 } else if (data.type === 'WORLD_STATE') {
@@ -990,6 +1216,10 @@ const MP = {
                         if (typeof updateTopMissionBadge === 'function') updateTopMissionBadge();
                     }
 
+                    if (data.missionStarted && !this.isMissionCurrentlyRunning() && typeof beginMissionLaunch === 'function') {
+                        beginMissionLaunch(true);
+                    }
+
                 } else if (data.type === 'MOVE' || data.type === 'HEARTBEAT') {
                     if (data.id !== this.myId && this.players[data.id]) {
                         Object.assign(this.players[data.id], data.pos, { lastSeen: performance.now() });
@@ -1007,6 +1237,11 @@ const MP = {
                         onRemoteTaskStateUpdated();
                     }
 
+                } else if (data.type === 'PLAYER_PUNCHED') {
+                    if (typeof this.onPunchCallback === 'function') {
+                        this.onPunchCallback(data);
+                    }
+
                 } else if (data.type === 'LAUNCH') {
                     if (data.players) {
                         this.players = data.players;
@@ -1020,6 +1255,7 @@ const MP = {
 
             // Si se va el anfitrión, todos vuelven al menú principal
             conn.on('close', () => {
+                if (joinRetryTimer) clearInterval(joinRetryTimer);
                 if (joinedOk && !this.voluntaryLeave) {
                     if (typeof stopArenaLoop === 'function') stopArenaLoop();
                     const arenaEl = document.getElementById('arena-container');
@@ -1051,10 +1287,13 @@ const MP = {
             type: 'ROOM_STATE',
             maxPlayers: this.maxPlayers,
             players: this.players,
-            missionId: GAME_STATE.selectedMission.id
+            missionId: GAME_STATE.selectedMission.id,
+            missionStarted: this.isMissionCurrentlyRunning()
         };
         this.guestConns.forEach(c => {
-            if (c.open) c.send(payload);
+            if (c && c.open) {
+                try { c.send(payload); } catch (_) {}
+            }
         });
     },
 
@@ -1074,16 +1313,18 @@ const MP = {
 
         // Los clientes envían sus movimientos al anfitrión; el anfitrión difunde el estado global a 10 Hz
         if (!this.isHost && this.hostConn && this.hostConn.open) {
-            this.hostConn.send({
-                type: 'MOVE',
-                id: this.myId,
-                pos: {
-                    x, y, z, rotY, moving,
-                    name: this.myName,
-                    characterId: GAME_STATE.selectedCharacterId,
-                    roleId: GAME_STATE.selectedRole.id
-                }
-            });
+            try {
+                this.hostConn.send({
+                    type: 'MOVE',
+                    id: this.myId,
+                    pos: {
+                        x, y, z, rotY, moving,
+                        name: this.myName,
+                        characterId: GAME_STATE.selectedCharacterId,
+                        roleId: GAME_STATE.selectedRole.id
+                    }
+                });
+            } catch (_) {}
         }
     },
 
@@ -1095,13 +1336,29 @@ const MP = {
             missionId: GAME_STATE.selectedMission.id,
             players: this.players
         };
-        this.guestConns.forEach(c => { if (c.open) c.send(msg); });
+        this.guestConns.forEach(c => {
+            if (c && c.open) {
+                try { c.send(msg); } catch (_) {}
+            }
+        });
     },
 
     updateBots(dt, boundsLimit) {
         if (!this.isHost) return;
         Object.values(this.players).forEach(p => {
             if (!p.isBot) return;
+
+            // Aplicar retroceso si un jugador empujó/golpeó al bot
+            if (Math.abs(p.kbX || 0) > 0.002 || Math.abs(p.kbZ || 0) > 0.002) {
+                p.x = Math.max(-boundsLimit, Math.min(boundsLimit, p.x + p.kbX));
+                p.z = Math.max(-boundsLimit, Math.min(boundsLimit, p.z + p.kbZ));
+                const damp = Math.exp(-10 * dt);
+                p.kbX *= damp;
+                p.kbZ *= damp;
+                p.moving = true;
+                return;
+            }
+
             p.waitTimer -= dt;
             if (p.waitTimer <= 0) {
                 p.targetX = (Math.random() - 0.5) * boundsLimit * 1.4;
