@@ -12,7 +12,7 @@ const GAME_DATA = {
             orbitLabel: 'ÓRBITA ACTUAL: LA LUNA',
             difficulty: 'Fácil',
             rewardCredits: 550,
-            desc: 'Complejo laberíntico de 25 sectores en el polo sur lunar con reservas de hielo.',
+            desc: 'Complejo de 36 sectores con largos pasillos presurizados en el polo sur lunar.',
             groundColor: 0x64748b,
             skyColor: 0x050814,
             accentColor: 0x38bdf8,
@@ -24,7 +24,7 @@ const GAME_DATA = {
             orbitLabel: 'ÓRBITA ACTUAL: PLANETA MARTE',
             difficulty: 'Normal',
             rewardCredits: 850,
-            desc: 'Estación de investigación presurizada de 25 sectores en la superficie marciana.',
+            desc: 'Estación interplanetaria de 36 sectores sobre el antiguo delta fluvial de Marte.',
             groundColor: 0xb45309,
             skyColor: 0x261209,
             accentColor: 0x10b981,
@@ -36,7 +36,7 @@ const GAME_DATA = {
             orbitLabel: 'ÓRBITA ACTUAL: LUNA EUROPA',
             difficulty: 'Experto',
             rewardCredits: 1250,
-            desc: 'Complejo orbital bajo cúpula térmica sobre la corteza glacial de Europa.',
+            desc: 'Laboratorio submarino-orbital de 36 sectores bajo la corteza glacial de Europa.',
             groundColor: 0x0e7490,
             skyColor: 0x04121c,
             accentColor: 0xf59e0b,
@@ -45,7 +45,7 @@ const GAME_DATA = {
     ],
     suitProtocols: [
         { id: 'proto_balanced', name: 'Protocolo Estándar NASA', desc: 'Equilibrio entre movilidad y soporte vital', o2Bonus: 0, shieldBonus: 0 },
-        { id: 'proto_explorer', name: 'Exploración de Largo Alcance', desc: '+35s extra de oxígeno para recorrer los 25 sectores', o2Bonus: 35, shieldBonus: 0 },
+        { id: 'proto_explorer', name: 'Exploración de Largo Alcance', desc: '+40s extra de oxígeno para explorar los 36 sectores', o2Bonus: 40, shieldBonus: 0 },
         { id: 'proto_vanguard', name: 'Blindaje Reforzado EVA', desc: '+15% escudo extra en travesía espacial', o2Bonus: 0, shieldBonus: 15 }
     ],
     shipCustomization: {
@@ -90,7 +90,7 @@ const GAME_DATA = {
             { id: 'scol_purple', name: 'Franjas Púrpura', price: 500, hex: 0x9333ea, css: '#9333ea', desc: 'Acabado violeta' }
         ]
     },
-    // Cada rol tiene 5 misiones ÚNICAS distribuidas por el complejo laberíntico de 25 sectores
+    // Coordenadas de terminales distribuidas en el complejo 6x6 (144x144, sectores en ±60, ±36, ±12)
     roles: [
         {
             id: 'commander',
@@ -98,78 +98,13 @@ const GAME_DATA = {
             short: 'Comandante',
             colorHex: 0x38bdf8,
             colorCss: '#38bdf8',
-            bonus: 'Puente Norte, Escudos NW, Giroscopios, Propulsores SE y Timón',
+            bonus: 'Puente Norte, Escudos NW, Giroscopios NE, Propulsores SE y Timón Central',
             tasks: [
-                {
-                    id: 'cmd_nav',
-                    title: 'Trazar Vector de Retorno Orbital',
-                    roomName: 'Puente Principal (Sector Norte)',
-                    wallLabel: 'PUENTE: VECTOR',
-                    type: 'sequence',
-                    x: 0,
-                    z: -54.8,
-                    rotY: 0,
-                    nasaFact: 'La Red del Espacio Profundo (DSN) de la NASA usa antenas en EE.UU., España y Australia para guiar naves.',
-                    nasaQuestion: '¿Qué red de antenas usa la NASA para rastrear naves interplanetarias?',
-                    nasaOptions: ['Red del Espacio Profundo (DSN)', 'Radar de tráfico aéreo', 'Satélites de televisión'],
-                    correctIdx: 0
-                },
-                {
-                    id: 'cmd_shield',
-                    title: 'Calibrar Escudo Deflector Planetario',
-                    roomName: 'Batería de Escudos (Sector Noroeste)',
-                    wallLabel: 'ESCUDOS: DEFLECTOR',
-                    type: 'timing',
-                    x: -54.8,
-                    z: -45,
-                    rotY: Math.PI / 2,
-                    nasaFact: 'La Estación Espacial Internacional usa escudos Whipple que desintegran micrometeoritos antes de perforar el casco.',
-                    nasaQuestion: '¿Para qué sirven los escudos Whipple en las naves de la NASA?',
-                    nasaOptions: ['Frenar impactos de micrometeoritos', 'Producir oxígeno líquido', 'Aumentar la gravedad'],
-                    correctIdx: 0
-                },
-                {
-                    id: 'cmd_gyro',
-                    title: 'Alinear Giroscopios de Estabilidad',
-                    roomName: 'Sala de Giroscopios (Sector Norte-Este)',
-                    wallLabel: 'GIROSCOPIOS: EJE',
-                    type: 'rivets',
-                    x: 22.5,
-                    z: -54.8,
-                    rotY: 0,
-                    nasaFact: 'Los giroscopios de control de momento (CMG) orientan la Estación Espacial sin gastar combustible.',
-                    nasaQuestion: '¿Qué ventaja tienen los giroscopios CMG en la Estación Espacial?',
-                    nasaOptions: ['Orientan la estación sin gastar combustible', 'Generan agua potable', 'Enfrían los motores'],
-                    correctIdx: 0
-                },
-                {
-                    id: 'cmd_thruster',
-                    title: 'Verificar Presión de Propulsores',
-                    roomName: 'Propulsores Principales (Sector Sureste)',
-                    wallLabel: 'MOTORES: EMPUJE',
-                    type: 'slider',
-                    x: 45,
-                    z: 54.8,
-                    rotY: Math.PI,
-                    nasaFact: 'El cohete SLS del programa Artemis de la NASA genera 39 meganewtons de empuje para viajar a la Luna.',
-                    nasaQuestion: '¿Cómo se llama el programa de la NASA que lleva astronautas de vuelta a la Luna?',
-                    nasaOptions: ['Programa Artemis', 'Misión Cassini', 'Proyecto Hubble'],
-                    correctIdx: 0
-                },
-                {
-                    id: 'cmd_helm',
-                    title: 'Sincronizar Piloto Automático de Acoplamiento',
-                    roomName: 'Control de Timón (Corredor Central-Norte)',
-                    wallLabel: 'TIMÓN: ACOPLAMIENTO',
-                    type: 'wires',
-                    x: -10.0,
-                    z: -29.0,
-                    rotY: Math.PI / 2,
-                    nasaFact: 'Las cápsulas Crew Dragon de la NASA usan sensores láser LIDAR para acoplarse automáticamente a la EEI.',
-                    nasaQuestion: '¿Qué sensor óptico guía el acoplamiento automático de las cápsulas espaciales?',
-                    nasaOptions: ['Sensores láser LIDAR', 'Brújula magnética', 'Sonar acústico'],
-                    correctIdx: 0
-                }
+                { id: 'cmd_1', roomName: 'Puente Principal (Norte)', wallLabel: 'PUENTE: NAVEGACIÓN', x: -12, z: -70.6, rotY: 0 },
+                { id: 'cmd_2', roomName: 'Batería de Escudos (Noroeste)', wallLabel: 'ESCUDOS: DEFLECTOR', x: -70.6, z: -60, rotY: Math.PI / 2 },
+                { id: 'cmd_3', roomName: 'Sala de Giroscopios (Norte-Este)', wallLabel: 'GIROSCOPIOS: EJE', x: 36, z: -70.6, rotY: 0 },
+                { id: 'cmd_4', roomName: 'Propulsores Principales (Sureste)', wallLabel: 'MOTORES: EMPUJE', x: 60, z: 70.6, rotY: Math.PI },
+                { id: 'cmd_5', roomName: 'Control de Timón (Corredor Central)', wallLabel: 'TIMÓN: ACOPLAMIENTO', x: -23.0, z: -36, rotY: Math.PI / 2 }
             ]
         },
         {
@@ -178,78 +113,13 @@ const GAME_DATA = {
             short: 'Ingeniero',
             colorHex: 0xf59e0b,
             colorCss: '#f59e0b',
-            bonus: 'Reactor Oeste, Subestación SW, Refrigeración, Carga SE y Turbinas',
+            bonus: 'Reactor Oeste, Subestación SW, Refrigeración, Esclusa Carga y Turbinas',
             tasks: [
-                {
-                    id: 'eng_core',
-                    title: 'Estabilizar Núcleo de Fusión',
-                    roomName: 'Reactor Principal (Sector Oeste)',
-                    wallLabel: 'REACTOR: NÚCLEO',
-                    type: 'timing',
-                    x: -54.8,
-                    z: 0,
-                    rotY: Math.PI / 2,
-                    nasaFact: 'El rover Perseverance usa un generador MMRTG que convierte el calor del plutonio-238 en electricidad continua.',
-                    nasaQuestion: '¿Cómo obtiene energía continua el rover Perseverance en Marte?',
-                    nasaOptions: ['Generador termoeléctrico MMRTG', 'Molinos de viento', 'Combustible diésel'],
-                    correctIdx: 0
-                },
-                {
-                    id: 'eng_wires',
-                    title: 'Reconectar Bus de Alta Tensión',
-                    roomName: 'Subestación Eléctrica (Sector Suroeste)',
-                    wallLabel: 'ELÉCTRICA: BUS',
-                    type: 'wires',
-                    x: -45,
-                    z: 54.8,
-                    rotY: Math.PI,
-                    nasaFact: 'Los paneles solares de la Estación Espacial Internacional generan hasta 120 kilovatios de electricidad.',
-                    nasaQuestion: '¿Cuál es la fuente principal de electricidad en la Estación Espacial Internacional?',
-                    nasaOptions: ['Paneles solares fotovoltaicos', 'Turbinas hidráulicas', 'Baterías desechables'],
-                    correctIdx: 0
-                },
-                {
-                    id: 'eng_coolant',
-                    title: 'Purgar Circuito de Refrigeración Térmica',
-                    roomName: 'Refrigeración Térmica (Sector Oeste-Norte)',
-                    wallLabel: 'TÉRMICA: RADIADOR',
-                    type: 'temp',
-                    x: -54.8,
-                    z: -22.5,
-                    rotY: Math.PI / 2,
-                    nasaFact: 'En el espacio no hay aire para disipar calor; la NASA usa radiadores de amoníaco líquido para enfriar las naves.',
-                    nasaQuestion: '¿Qué fluido circula por los radiadores externos de la Estación Espacial para enfriarla?',
-                    nasaOptions: ['Amoníaco líquido', 'Agua salada', 'Gas helio'],
-                    correctIdx: 0
-                },
-                {
-                    id: 'eng_hull',
-                    title: 'Sellar Compuerta Presurizada',
-                    roomName: 'Esclusa de Carga (Sector Sureste)',
-                    wallLabel: 'CARGA: COMPUERTA',
-                    type: 'rivets',
-                    x: 54.8,
-                    z: 45,
-                    rotY: -Math.PI / 2,
-                    nasaFact: 'En el vacío espacial la presión es cero; las esclusas herméticas evitan que se pierda el aire respirable.',
-                    nasaQuestion: '¿Por qué es vital sellar herméticamente las compuertas de una base espacial?',
-                    nasaOptions: ['Conservar la presión y el oxígeno', 'Evitar que entre lluvia', 'Reducir el peso del módulo'],
-                    correctIdx: 0
-                },
-                {
-                    id: 'eng_turbine',
-                    title: 'Calibrar Turbinas de Soporte Vital',
-                    roomName: 'Turbinas Auxiliares (Corredor Central-Sur)',
-                    wallLabel: 'TURBINAS: FLUJO',
-                    type: 'sequence',
-                    x: 10.0,
-                    z: 29.0,
-                    rotY: -Math.PI / 2,
-                    nasaFact: 'El sistema ECLSS de la NASA recicla hasta el 98% del agua y la humedad del aire dentro de la estación.',
-                    nasaQuestion: '¿Qué porcentaje de agua logra reciclar el sistema ECLSS de la NASA?',
-                    nasaOptions: ['Cerca del 98%', 'Solo el 15%', 'El 50%'],
-                    correctIdx: 0
-                }
+                { id: 'eng_1', roomName: 'Reactor Principal (Oeste)', wallLabel: 'REACTOR: NÚCLEO', x: -70.6, z: -12, rotY: Math.PI / 2 },
+                { id: 'eng_2', roomName: 'Subestación Eléctrica (Suroeste)', wallLabel: 'ELÉCTRICA: BUS', x: -60, z: 70.6, rotY: Math.PI },
+                { id: 'eng_3', roomName: 'Refrigeración Térmica (Oeste-Norte)', wallLabel: 'TÉRMICA: RADIADOR', x: -70.6, z: -36, rotY: Math.PI / 2 },
+                { id: 'eng_4', roomName: 'Esclusa de Carga (Sureste)', wallLabel: 'CARGA: COMPUERTA', x: 70.6, z: 60, rotY: -Math.PI / 2 },
+                { id: 'eng_5', roomName: 'Turbinas Auxiliares (Pasillo Sur)', wallLabel: 'TURBINAS: FLUJO', x: 23.0, z: 36, rotY: -Math.PI / 2 }
             ]
         },
         {
@@ -258,78 +128,13 @@ const GAME_DATA = {
             short: 'Científico',
             colorHex: 0x10b981,
             colorCss: '#10b981',
-            bonus: 'Lab Este, Criogenia NE, Invernadero, Atmósfera Central y Geología',
+            bonus: 'Lab Este, Criogenia NE, Invernadero LED, Atmósfera Central y Geología',
             tasks: [
-                {
-                    id: 'sci_dna',
-                    title: 'Secuenciar Muestra Mineral Extraterrestre',
-                    roomName: 'Laboratorio Astrobiológico (Sector Este)',
-                    wallLabel: 'LAB: ISÓTOPOS',
-                    type: 'sequence',
-                    x: 54.8,
-                    z: 0,
-                    rotY: -Math.PI / 2,
-                    nasaFact: 'El cráter Jezero en Marte fue un antiguo lago hace 3.500 millones de años, clave para buscar vida microbiana.',
-                    nasaQuestion: '¿Por qué la NASA explora el cráter Jezero en Marte?',
-                    nasaOptions: ['Contuvo un antiguo lago de agua', 'Tiene bosques subterráneos', 'Es la zona más cálida'],
-                    correctIdx: 0
-                },
-                {
-                    id: 'sci_cryo',
-                    title: 'Regular Cámara Criogénica de Cultivos',
-                    roomName: 'Cámara Criogénica (Sector Noreste)',
-                    wallLabel: 'O2: CRIOGENIA',
-                    type: 'temp',
-                    x: 45,
-                    z: -54.8,
-                    rotY: 0,
-                    nasaFact: 'El cráter Shackleton en el polo sur de la Luna guarda hielo de agua en zonas que nunca reciben luz solar.',
-                    nasaQuestion: '¿Qué recurso estratégico encontró la NASA en el polo sur lunar?',
-                    nasaOptions: ['Hielo de agua', 'Gas natural', 'Rocas volcánicas calientes'],
-                    correctIdx: 0
-                },
-                {
-                    id: 'sci_hydro',
-                    title: 'Ajustar Iluminación LED de Cultivos Espaciales',
-                    roomName: 'Invernadero Hidropónico (Sector Este-Norte)',
-                    wallLabel: 'BOTÁNICA: LED',
-                    type: 'wires',
-                    x: 54.8,
-                    z: -22.5,
-                    rotY: -Math.PI / 2,
-                    nasaFact: 'El experimento Veggie de la NASA cultiva lechugas y rábanos en microgravedad usando luces LED rojas y azules.',
-                    nasaQuestion: '¿Qué colores de luz LED usa principalmente el cultivo Veggie de la NASA?',
-                    nasaOptions: ['Roja y azul', 'Ultravioleta e infrarroja', 'Solo luz amarilla'],
-                    correctIdx: 0
-                },
-                {
-                    id: 'sci_atmo',
-                    title: 'Analizar Espectrómetro Atmosférico',
-                    roomName: 'Analizador Atmosférico (Núcleo Central)',
-                    wallLabel: 'CENTRAL: ATMÓSFERA',
-                    type: 'slider',
-                    x: 10.0,
-                    z: -6.5,
-                    rotY: -Math.PI / 2,
-                    nasaFact: 'El instrumento MOXIE de la NASA produjo oxígeno respirable a partir del 95% de CO₂ de la atmósfera de Marte.',
-                    nasaQuestion: '¿De qué gas extrajo oxígeno el experimento MOXIE de la NASA en Marte?',
-                    nasaOptions: ['Dióxido de carbono (CO₂)', 'Helio atmosférico', 'Vapor de mercurio'],
-                    correctIdx: 0
-                },
-                {
-                    id: 'sci_geo',
-                    title: 'Calibrar Sismógrafo de Corteza Planetaria',
-                    roomName: 'Escáner Geológico (Sector Sur-Oeste)',
-                    wallLabel: 'GEOLOGÍA: SISMO',
-                    type: 'timing',
-                    x: -22.5,
-                    z: 54.8,
-                    rotY: Math.PI,
-                    nasaFact: 'La misión InSight de la NASA detectó más de 1.300 terremotos marcianos ("martemotos") para estudiar su núcleo.',
-                    nasaQuestion: '¿Qué misión de la NASA midió terremotos en Marte para estudiar su interior?',
-                    nasaOptions: ['Misión InSight', 'Sonda Voyager 1', 'Telescopio Kepler'],
-                    correctIdx: 0
-                }
+                { id: 'sci_1', roomName: 'Laboratorio Astrobiológico (Este)', wallLabel: 'LAB: ISÓTOPOS', x: 70.6, z: -12, rotY: -Math.PI / 2 },
+                { id: 'sci_2', roomName: 'Cámara Criogénica (Noreste)', wallLabel: 'O2: CRIOGENIA', x: 60, z: -70.6, rotY: 0 },
+                { id: 'sci_3', roomName: 'Invernadero Hidropónico (Este-Norte)', wallLabel: 'BOTÁNICA: LED', x: 70.6, z: -36, rotY: -Math.PI / 2 },
+                { id: 'sci_4', roomName: 'Analizador Atmosférico (Núcleo)', wallLabel: 'CENTRAL: ATMÓSFERA', x: 23.0, z: -12, rotY: -Math.PI / 2 },
+                { id: 'sci_5', roomName: 'Escáner Geológico (Sur-Oeste)', wallLabel: 'GEOLOGÍA: SISMO', x: -36, z: 70.6, rotY: Math.PI }
             ]
         },
         {
@@ -338,82 +143,247 @@ const GAME_DATA = {
             short: 'Comunicaciones',
             colorHex: 0xa855f7,
             colorCss: '#a855f7',
-            bonus: 'Antenas Sur, Satélite NW, Radar Este-Sur, Servidor SW y Baliza',
+            bonus: 'Antenas Sur, Satélite NW, Radar Este-Sur, Servidor SW y Baliza Central',
             tasks: [
-                {
-                    id: 'com_freq',
-                    title: 'Sintonizar Antena de Espacio Profundo',
-                    roomName: 'Torre de Antenas (Sector Sur)',
-                    wallLabel: 'COMMS: ANTENA',
-                    type: 'slider',
-                    x: 0,
-                    z: 54.8,
-                    rotY: Math.PI,
-                    nasaFact: 'Las ondas de radio viajan a la velocidad de la luz y tardan hasta 22 minutos en ir de Marte a la Tierra.',
-                    nasaQuestion: '¿Por qué las comunicaciones entre Marte y la Tierra tienen minutos de retraso?',
-                    nasaOptions: ['La gran distancia entre planetas', 'Falta de antenas en la Tierra', 'Interferencia de asteroides'],
-                    correctIdx: 0
-                },
-                {
-                    id: 'com_nodes',
-                    title: 'Enlazar Nodos de Satélite Orbital',
-                    roomName: 'Enlace Satelital (Sector Norte-Oeste)',
-                    wallLabel: 'SATÉLITE: ENLACE',
-                    type: 'wires',
-                    x: -22.5,
-                    z: -54.8,
-                    rotY: 0,
-                    nasaFact: 'La sonda Europa Clipper de la NASA estudia Europa, luna de Júpiter con un océano salado bajo su hielo.',
-                    nasaQuestion: '¿Qué oculta la luna Europa debajo de su corteza helada según la NASA?',
-                    nasaOptions: ['Un océano global de agua líquida', 'Un núcleo de madera', 'Cráteres de lava'],
-                    correctIdx: 0
-                },
-                {
-                    id: 'com_radar',
-                    title: 'Rastrear Trayectoria de Asteroides Cercanos',
-                    roomName: 'Radar Espacial (Sector Este-Sur)',
-                    wallLabel: 'RADAR: ÓRBITAS',
-                    type: 'timing',
-                    x: 54.8,
-                    z: 22.5,
-                    rotY: -Math.PI / 2,
-                    nasaFact: 'La misión DART de la NASA desvió con éxito la órbita del asteroide Dimorphos como prueba de defensa planetaria.',
-                    nasaQuestion: '¿Qué logró la misión DART de la NASA al impactar contra el asteroide Dimorphos?',
-                    nasaOptions: ['Desviar su órbita espacial', 'Convertirlo en satélite lunar', 'Extraer oro de su núcleo'],
-                    correctIdx: 0
-                },
-                {
-                    id: 'com_data',
-                    title: 'Codificar Paquete de Datos a la Tierra',
-                    roomName: 'Servidor Cuántico (Sector Suroeste)',
-                    wallLabel: 'SERVIDOR: DATOS',
-                    type: 'sequence',
-                    x: -54.8,
-                    z: 45,
-                    rotY: Math.PI / 2,
-                    nasaFact: 'El sistema DSOC de la NASA probó láseres ópticos para transmitir datos desde el espacio profundo mucho más rápido.',
-                    nasaQuestion: '¿Qué tecnología usa el sistema DSOC de la NASA para acelerar envíos de datos?',
-                    nasaOptions: ['Láseres ópticos', 'Señales acústicas', 'Cables de cobre'],
-                    correctIdx: 0
-                },
-                {
-                    id: 'com_beacon',
-                    title: 'Activar Baliza de Telemetría de Retorno',
-                    roomName: 'Baliza Central (Núcleo Oeste)',
-                    wallLabel: 'BALIZA: TELEMETRÍA',
-                    type: 'rivets',
-                    x: -10.0,
-                    z: 6.5,
-                    rotY: Math.PI / 2,
-                    nasaFact: 'La red TDRS de satélites de la NASA permite comunicación casi continua entre naves en órbita y centros de control.',
-                    nasaQuestion: '¿Para qué sirve la constelación de satélites TDRS de la NASA?',
-                    nasaOptions: ['Retransmitir datos y telemetría', 'Medir la temperatura del mar', 'Fotografiar galaxias lejanas'],
-                    correctIdx: 0
-                }
+                { id: 'com_1', roomName: 'Torre de Antenas (Sur)', wallLabel: 'COMMS: ANTENA', x: -12, z: 70.6, rotY: Math.PI },
+                { id: 'com_2', roomName: 'Enlace Satelital (Norte-Oeste)', wallLabel: 'SATÉLITE: ENLACE', x: -36, z: -70.6, rotY: 0 },
+                { id: 'com_3', roomName: 'Radar Espacial (Este-Sur)', wallLabel: 'RADAR: ÓRBITAS', x: 70.6, z: 36, rotY: -Math.PI / 2 },
+                { id: 'com_4', roomName: 'Servidor Cuántico (Suroeste)', wallLabel: 'SERVIDOR: DATOS', x: -70.6, z: 60, rotY: Math.PI / 2 },
+                { id: 'com_5', roomName: 'Baliza Central (Núcleo Oeste)', wallLabel: 'BALIZA: TELEMETRÍA', x: -23.0, z: 12, rotY: Math.PI / 2 }
             ]
         }
-    ]
+    ],
+    // Banco de desafíos de ingeniería espacial específicos por planeta (se mezclan aleatoriamente en cada sala)
+    planetChallengePools: {
+        moon: [
+            {
+                title: 'Extraer Agua de Regolito Polar',
+                type: 'temp',
+                nasaFact: 'En el polo sur lunar (cráter Shackleton), el hielo permanece atrapado en sombra perpetua a temperaturas bajo -160°C.',
+                nasaQuestion: '¿Qué proceso de ingeniería espacial permite obtener agua líquida e hidrógeno en la Luna?',
+                nasaOptions: ['Calentamiento térmico del regolito helado (ISRU)', 'Perforación de ríos subterráneos lunares', 'Condensación de nubes de lluvia lunar'],
+                correctIdx: 0
+            },
+            {
+                title: 'Mitigar Polvo Electrostático Lunar',
+                type: 'shields_charge',
+                nasaFact: 'El polvo lunar tiene bordes microscópicos afilados como vidrio y carga electrostática por el viento solar.',
+                nasaQuestion: '¿Cómo protege la NASA los visores y trajes espaciales contra el polvo lunar abrasivo?',
+                nasaOptions: ['Escudos electrodinámicos (EDS) que repelen partículas', 'Lavando los trajes con aire comprimido exterior', 'Aplicando aceite lubricante en el visor'],
+                correctIdx: 0
+            },
+            {
+                title: 'Calibrar Relé Óptico Tierra-Luna',
+                type: 'dish_align',
+                nasaFact: 'La luz tarda apenas 1.28 segundos en viajar entre la Tierra y la Luna, permitiendo teleoperación casi en tiempo real.',
+                nasaQuestion: '¿Cuánto tarda aproximadamente una señal de radio o láser en llegar desde la Luna a la Tierra?',
+                nasaOptions: ['1.28 segundos', '22 minutos', '4 horas'],
+                correctIdx: 0
+            },
+            {
+                title: 'Equilibrar Microrred Solar Polar',
+                type: 'power_balance',
+                nasaFact: 'Los bordes del cráter Shackleton reciben luz solar casi el 90% del año lunar, ideal para paneles verticales.',
+                nasaQuestion: '¿Por qué los paneles solares en el polo sur lunar se instalan verticalmente?',
+                nasaOptions: ['Porque el Sol siempre está muy bajo en el horizonte polar', 'Para evitar la lluvia de meteoritos verticales', 'Para enfriar el suelo lunar'],
+                correctIdx: 0
+            },
+            {
+                title: 'Sincronizar Órbita Gateway NRHO',
+                type: 'orbit_sync',
+                nasaFact: 'La estación Lunar Gateway usa una órbita de halo casi rectilínea (NRHO) que mantiene comunicación directa con la Tierra.',
+                nasaQuestion: '¿Qué ventaja ofrece la órbita NRHO de la estación Lunar Gateway?',
+                nasaOptions: ['Evita eclipses largos y mantiene contacto con la Tierra', 'Aterriza directamente en el mar de la Tranquilidad', 'Gira más rápido que la rotación terrestre'],
+                correctIdx: 0
+            },
+            {
+                title: 'Sellar Esclusa de Presión Cero',
+                type: 'rivets',
+                nasaFact: 'La Luna carece de atmósfera densa; cualquier microfisura en un hábitat provoca despresurización inmediata.',
+                nasaQuestion: '¿Cuál es la presión atmosférica aproximada en la superficie de la Luna?',
+                nasaOptions: ['Prácticamente vacío (cercana a cero)', 'Igual que en la cima del Everest', 'El doble que en la Tierra'],
+                correctIdx: 0
+            },
+            {
+                title: 'Secuenciar Telemetría de Sismómetro',
+                type: 'sequence',
+                nasaFact: 'Los sismómetros de las misiones Apolo revelaron "lunamotos" que duran más de 10 minutos debido a la corteza seca.',
+                nasaQuestion: '¿Por qué los sismos lunares duran mucho más tiempo que los terremotos terrestres?',
+                nasaOptions: ['La corteza lunar es seca y rígida sin agua que amortigüe', 'La Luna tiene océanos de magma superficiales', 'Por el viento magnético de Júpiter'],
+                correctIdx: 0
+            },
+            {
+                title: 'Sintetizar Oxígeno desde Ilmenita',
+                type: 'fuel_mix',
+                nasaFact: 'El mineral lunar ilmenita (FeTiO₃) contiene oxígeno químico que puede extraerse mediante electrólisis de regolito fundido.',
+                nasaQuestion: '¿Qué elemento vital se extrae al procesar el mineral lunar ilmenita?',
+                nasaOptions: ['Oxígeno respirable y oxidante para cohetes', 'Nitrógeno líquido atmosférico', 'Gas metano natural'],
+                correctIdx: 0
+            }
+        ],
+        mars: [
+            {
+                title: 'Operar Reactor MOXIE de CO₂',
+                type: 'fuel_mix',
+                nasaFact: 'La atmósfera de Marte está compuesta en un 95% por dióxido de carbono (CO₂), ideal para producir oxígeno in situ.',
+                nasaQuestion: '¿Cuál es el gas principal que compone el 95% de la atmósfera marciana?',
+                nasaOptions: ['Dióxido de carbono (CO₂)', 'Oxígeno molecular (O₂)', 'Hidrógeno gaseoso'],
+                correctIdx: 0
+            },
+            {
+                title: 'Compensar Retardo de Señal Marte',
+                type: 'slider',
+                nasaFact: 'Debido a la distancia orbital, una señal entre Marte y la Tierra tarda entre 4 y 24 minutos según su posición.',
+                nasaQuestion: '¿Por qué los rovers en Marte necesitan software de navegación autónoma?',
+                nasaOptions: ['Porque el retardo de señal impide conducirlos con joystick', 'Porque Marte bloquea todas las ondas de radio', 'Porque no tienen cámaras a bordo'],
+                correctIdx: 0
+            },
+            {
+                title: 'Calibrar Rotor Helicóptero Ingenuity',
+                type: 'orbit_sync',
+                nasaFact: 'La atmósfera de Marte tiene solo el 1% de la densidad terrestre; las aspas de Ingenuity giran a 2.500 rpm.',
+                nasaQuestion: '¿Por qué el helicóptero Ingenuity necesita girar sus aspas a 2.500 revoluciones por minuto?',
+                nasaOptions: ['Para generar sustentación en una atmósfera muy tenue', 'Para perforar rocas sedimentarias', 'Para recargar su batería por fricción'],
+                correctIdx: 0
+            },
+            {
+                title: 'Proteger Generador Nuclear MMRTG',
+                type: 'power_balance',
+                nasaFact: 'Las tormentas de polvo globales en Marte pueden durar meses y bloquear la luz solar; el MMRTG usa plutonio-238.',
+                nasaQuestion: '¿Qué ventaja tiene un generador MMRTG frente a paneles solares durante tormentas en Marte?',
+                nasaOptions: ['Produce electricidad día y noche sin depender del Sol', 'Absorbe energía directamente del viento marciano', 'Congela el dióxido de carbono del aire'],
+                correctIdx: 0
+            },
+            {
+                title: 'Alinear Antena de Banda X',
+                type: 'dish_align',
+                nasaFact: 'Los rovers usan antenas de alta ganancia en Banda X para enviar imágenes HD directamente a la Red del Espacio Profundo.',
+                nasaQuestion: '¿Qué frecuencia utiliza la NASA para transmitir datos científicos de alta velocidad desde Marte?',
+                nasaOptions: ['Microondas en Banda X y Banda Ka', 'Ondas de radio AM comerciales', 'Ultrasonido atmosférico'],
+                correctIdx: 0
+            },
+            {
+                title: 'Analizar Espectrómetro Láser SuperCam',
+                type: 'binary_decode',
+                nasaFact: 'El láser de SuperCam en Perseverance vaporiza rocas a 7 metros para analizar su composición química por espectroscopía.',
+                nasaQuestion: '¿Cómo identifica el instrumento SuperCam los minerales de una roca marciana a distancia?',
+                nasaOptions: ['Analizando la luz del plasma generado por un láser', 'Lanzando sondas con cables de cobre', 'Midiendo su peso con un imán'],
+                correctIdx: 0
+            },
+            {
+                title: 'Controlar Escudo Térmico de Entrada',
+                type: 'timing',
+                nasaFact: 'Durante los "7 minutos de terror", la cápsula entra a Marte a 20.000 km/h y soporta más de 1.300°C.',
+                nasaQuestion: '¿Qué componente protege a la nave del calor extremo al entrar en la atmósfera de Marte?',
+                nasaOptions: ['Escudo térmico ablativo', 'Paracaídas de aluminio', 'Tanques de agua externa'],
+                correctIdx: 0
+            },
+            {
+                title: 'Reconectar Bus de Energía del Hábitat',
+                type: 'wires',
+                nasaFact: 'Los hábitats marcianos requieren redundancia eléctrica triple para mantener el reciclaje de aire y agua.',
+                nasaQuestion: '¿Por qué los sistemas críticos de soporte vital de la NASA tienen circuitos redundantes?',
+                nasaOptions: ['Para evitar fallos totales si un circuito se daña', 'Para consumir el triple de energía', 'Para aumentar la gravedad artificial'],
+                correctIdx: 0
+            }
+        ],
+        europa: [
+            {
+                title: 'Reforzar Blindaje contra Radiación Joviana',
+                type: 'shields_charge',
+                nasaFact: 'Júpiter posee un campo magnético gigantesco que atrapa partículas de alta energía que bombardean la superficie de Europa.',
+                nasaQuestion: '¿Cuál es el mayor peligro ambiental en la superficie helada de la luna Europa?',
+                nasaOptions: ['Intensa radiación atrapada por Júpiter', 'Lluvia ácida volcánica constante', 'Vientos huracanados de 800 km/h'],
+                correctIdx: 0
+            },
+            {
+                title: 'Calibrar Radar Penetrador de Hielo REASON',
+                type: 'dish_align',
+                nasaFact: 'La sonda Europa Clipper usa radar de penetración para medir el espesor de la capa de hielo (de 15 a 25 km).',
+                nasaQuestion: '¿Qué espesor estimado tiene la corteza de hielo que cubre el océano de Europa?',
+                nasaOptions: ['Entre 15 y 25 kilómetros', 'Apenas 2 metros', 'Más de 500 kilómetros'],
+                correctIdx: 0
+            },
+            {
+                title: 'Regular Sonda Criobot de Perforación',
+                type: 'temp',
+                nasaFact: 'La temperatura superficial en Europa ronda los -160°C, manteniendo el hielo tan duro como el granito terrestre.',
+                nasaQuestion: '¿Cómo se comporta el hielo en Europa a -160°C para la ingeniería de aterrizaje?',
+                nasaOptions: ['Tan duro como roca de granito', 'Blando como nieve fresca', 'Líquido y viscoso'],
+                correctIdx: 0
+            },
+            {
+                title: 'Analizar Plumas de Vapor de Agua',
+                type: 'fuel_mix',
+                nasaFact: 'El telescopio Hubble detectó géiseres de vapor de agua expulsados desde grietas en el polo sur de Europa.',
+                nasaQuestion: '¿Qué permiten estudiar los géiseres de vapor de Europa sin necesidad de perforar kilómetros de hielo?',
+                nasaOptions: ['La química del océano subterráneo oculto', 'La temperatura del núcleo de Júpiter', 'La velocidad de los anillos de Saturno'],
+                correctIdx: 0
+            },
+            {
+                title: 'Estabilizar Magnetómetro de Océano Salado',
+                type: 'orbit_sync',
+                nasaFact: 'Europa altera el campo magnético de Júpiter al moverse, lo que demostró que posee un océano global de agua salada.',
+                nasaQuestion: '¿Cómo descubrieron los científicos que Europa tiene un océano salado conductor bajo el hielo?',
+                nasaOptions: ['Por las perturbaciones magnéticas inducidas por Júpiter', 'Observando peces con telescopios', 'Por el color verde de su atmósfera'],
+                correctIdx: 0
+            },
+            {
+                title: 'Decodificar Telemetría de Europa Clipper',
+                type: 'binary_decode',
+                nasaFact: 'Europa Clipper realiza 49 sobrevuelos rasantes en lugar de orbitar Europa continuamente para sobrevivir a la radiación.',
+                nasaQuestion: '¿Por qué Europa Clipper hace sobrevuelos elípticos en vez de quedarse fija en órbita baja?',
+                nasaOptions: ['Para salir de los cinturones de radiación y transmitir datos', 'Porque no tiene propulsores de frenado', 'Para ahorrar combustible nuclear'],
+                correctIdx: 0
+            },
+            {
+                title: 'Distribuir Potencia de Paneles Gigantes',
+                type: 'power_balance',
+                nasaFact: 'En Júpiter la luz solar es 25 veces más débil que en la Tierra; Europa Clipper usa paneles solares de 30 metros.',
+                nasaQuestion: '¿Por qué los paneles solares de Europa Clipper miden más de 30 metros de envergadura?',
+                nasaOptions: ['Porque en Júpiter llega 25 veces menos luz solar', 'Para usarlos como velas atmosféricas', 'Para reflejar luz hacia la Tierra'],
+                correctIdx: 0
+            },
+            {
+                title: 'Sellar Compuerta Térmica Criogénica',
+                type: 'rivets',
+                nasaFact: 'Los sellos metálicos especiales evitan que el frío extremo de -170°C fragilice las juntas de la estación.',
+                nasaQuestion: '¿Qué ocurre con los plásticos y gomas comunes a temperaturas criogénicas espaciales?',
+                nasaOptions: ['Se vuelven quebradizos y se fracturan', 'Se derriten instantáneamente', 'Se vuelven magnéticos'],
+                correctIdx: 0
+            }
+        ]
+    }
 };
+
+function getMissionTasksForRole(missionId, roleId, seedNumber) {
+    const roleDef = GAME_DATA.roles.find(r => r.id === roleId) || GAME_DATA.roles[0];
+    const pool = GAME_DATA.planetChallengePools[missionId] || GAME_DATA.planetChallengePools.moon;
+    const roleOffset = GAME_DATA.roles.findIndex(r => r.id === roleId);
+
+    // Mezcla determinista por código de sala + planeta + rol para que cada sala y planeta tengan retos distintos
+    const indices = pool.map((_, i) => i);
+    let seed = (parseInt(seedNumber, 10) || 1234) + roleOffset * 37 + missionId.length * 19;
+    for (let i = indices.length - 1; i > 0; i--) {
+        seed = (seed * 9301 + 49297) % 233280;
+        const j = seed % (i + 1);
+        [indices[i], indices[j]] = [indices[j], indices[i]];
+    }
+
+    return roleDef.tasks.map((slot, idx) => {
+        const challenge = pool[indices[idx % indices.length]];
+        return {
+            ...slot,
+            id: `${missionId}_${slot.id}_${idx}`,
+            title: challenge.title,
+            type: challenge.type,
+            nasaFact: challenge.nasaFact,
+            nasaQuestion: challenge.nasaQuestion,
+            nasaOptions: challenge.nasaOptions,
+            correctIdx: challenge.correctIdx
+        };
+    });
+}
 
 const DEFAULT_UNLOCKED_PARTS = [
     'nose_standard',
