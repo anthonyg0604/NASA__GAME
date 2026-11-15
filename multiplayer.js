@@ -37,6 +37,8 @@ const MP = {
     takenRolesByOthers: {}, // { roleId: playerName }
     completedTasksByRole: {}, // { roleId: [taskId1, taskId2] }
     lastSendTime: 0,
+    lastHeartbeatTime: 0,
+    lastPruneTime: 0,
     lastPeekedCode: '',
 
     initLobbyUI() {
@@ -54,9 +56,11 @@ const MP = {
         this.syncLocalPlayerEntry();
         this.rebuildBotSlots();
         this.renderPlayersList();
+        this.setCountButtonsLocked(false);
 
         document.querySelectorAll('.count-btn').forEach(btn => {
             btn.onclick = () => {
+                if (!this.isHost) return;
                 document.querySelectorAll('.count-btn').forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
                 this.maxPlayers = parseInt(btn.dataset.count, 10);
@@ -87,6 +91,7 @@ const MP = {
             this.isHost = true;
             this.takenRolesByOthers = {};
             this.lastPeekedCode = '';
+            this.setCountButtonsLocked(false);
             document.getElementById('tab-create-btn').classList.add('active');
             document.getElementById('tab-join-btn').classList.remove('active');
             document.getElementById('panel-create-room').classList.remove('hidden');
@@ -103,6 +108,7 @@ const MP = {
             this.isHost = false;
             this.takenRolesByOthers = {};
             this.lastPeekedCode = '';
+            this.setCountButtonsLocked(true);
             document.getElementById('tab-join-btn').classList.add('active');
             document.getElementById('tab-create-btn').classList.remove('active');
             document.getElementById('panel-join-room').classList.remove('hidden');
@@ -161,6 +167,144 @@ const MP = {
             this.renderPlayersList();
             document.getElementById('lobby-modal').classList.remove('hidden');
         };
+
+        // Notificar inmediatamente si el jugador cierra la pestaña o recarga la página
+        const notifyUnload = () => {
+            const leaveMsg = { type: 'PLAYER_LEAVE', id: this.myId, name: this.myName };
+            try {
+                if (this.isHost) {
+                    this.guestConns.forEach(c => { if (c.open) c.send(leaveMsg); });
+                } else if (this.hostConn && this.hostConn.open) {
+                    this.hostConn.send(leaveMsg);
+                }
+                if (this.peer) this.peer.destroy();
+            } catch (_) {}
+        };
+        window.addEventListener('beforeunload', notifyUnload);
+        window.addEventListener('pagehide', notifyUnload);
+    },
+
+    setCountButtonsLocked(locked) {
+        const btns = document.querySelectorAll('.count-btn');
+        btns.forEach(btn => {
+            btn.disabled = locked;
+            btn.style.opacity = locked ? '0.35' : '1';
+            btn.style.pointerEvents = locked ? 'none' : 'auto';
+            btn.style.cursor = locked ? 'not-allowed' : 'pointer';
+        });
+        const firstBtn = btns[0];
+        if (firstBtn && firstBtn.parentElement) {
+            let note = document.getElementById('count-locked-note');
+            if (locked) {
+                if (!note) {
+                    note = document.createElement('div');
+                    note.id = 'count-locked-note';
+                    note.style.cssText = 'font-size:0.74rem; color:#94a3b8; margin-top:4px; font-style:italic;';
+                    note.innerText = '🔒 El cupo de jugadores lo define el anfitrión de la sala.';
+                    firstBtn.parentElement.insertAdjacentElement('afterend', note);
+                }
+            } else if (note) {
+                note.remove();
+            }
+        }
+    },
+
+    showNetworkToast(message, isWarning = true) {
+        let toastBox = document.getElementById('mp-toast-container');
+        if (!toastBox) {
+            toastBox = document.createElement('div');
+            toastBox.id = 'mp-toast-container';
+            toastBox.style.cssText = 'position:fixed; top:76px; left:50%; transform:translateX(-50%); z-index:9999; display:flex; flex-direction:column; gap:8px; pointer-events:none; align-items:center;';
+            document.body.appendChild(toastBox);
+        }
+
+        const item = document.createElement('div');
+        item.style.cssText = `
+            background: rgba(15, 23, 42, 0.94);
+            border: 1.5px solid ${isWarning ? '#f59e0b' : '#38bdf8'};
+            color: #f8fafc;
+            padding: 10px 18px;
+            border-radius: 12px;
+            font-size: 0.88rem;
+            font-weight: 700;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.55);
+            transition: opacity 0.4s ease;
+        `;
+        item.innerText = message;
+        toastBox.appendChild(item);
+
+        setTimeout(() => {
+            item.style.opacity = '0';
+            setTimeout(() => item.remove(), 420);
+        }, 4200);
+    },
+
+    handlePlayerRemoved(playerId, customReason) {
+        const departing = this.players[playerId];
+        if (!departing) return;
+
+        const roleObj = GAME_DATA.roles.find(r => r.id === departing.roleId);
+        const roleLabel = roleObj ? roleObj.short : 'Tripulante';
+        const displayName = departing.name || 'Jugador';
+
+        delete this.players[playerId];
+        this.refreshTakenRolesFromPlayers();
+        this.rebuildBotSlots();
+        this.renderLobbyRoles();
+        this.renderPlayersList();
+
+        this.showNetworkToast(
+            customReason || `⚠️ ${displayName} (${roleLabel}) salió de la partida. Misiones actualizadas.`
+        );
+
+        if (typeof onRemoteTaskStateUpdated === 'function') {
+            onRemoteTaskStateUpdated();
+        }
+        if (this.isHost) {
+            this.broadcastRoomState();
+        }
+    },
+
+    tickNetworkHealth() {
+        const now = performance.now();
+
+        // Enviar latido constante incluso si el jugador está quieto
+        if (now - this.lastHeartbeatTime >= 1100) {
+            this.lastHeartbeatTime = now;
+            const me = this.players[this.myId];
+            if (me) {
+                const hb = {
+                    type: 'HEARTBEAT',
+                    id: this.myId,
+                    pos: {
+                        x: me.x,
+                        y: me.y,
+                        z: me.z,
+                        rotY: me.rotY,
+                        moving: false,
+                        name: this.myName,
+                        characterId: GAME_STATE.selectedCharacterId,
+                        roleId: GAME_STATE.selectedRole.id
+                    }
+                };
+                if (this.isHost) {
+                    this.guestConns.forEach(c => { if (c.open) c.send(hb); });
+                } else if (this.hostConn && this.hostConn.open) {
+                    this.hostConn.send(hb);
+                }
+            }
+        }
+
+        // Revisar cada 1s si algún jugador dejó de responder (> 4.5s sin señales)
+        if (now - this.lastPruneTime >= 1000) {
+            this.lastPruneTime = now;
+            Object.values(this.players).forEach(p => {
+                if (p.id === this.myId || p.isBot) return;
+                if (p.lastSeen && (now - p.lastSeen > 4500)) {
+                    this.handlePlayerRemoved(p.id);
+                }
+            });
+        }
     },
 
     getActiveRolesInMatch() {
@@ -301,6 +445,7 @@ const MP = {
             characterId: GAME_STATE.selectedCharacterId,
             roleId: GAME_STATE.selectedRole.id,
             isBot: false,
+            lastSeen: performance.now(),
             x: prev.x ?? 0,
             y: prev.y ?? 0,
             z: prev.z ?? 4.5,
@@ -397,12 +542,7 @@ const MP = {
                 conn.on('close', () => {
                     this.guestConns = this.guestConns.filter(c => c !== conn);
                     if (conn.peerPlayerId && this.players[conn.peerPlayerId]) {
-                        delete this.players[conn.peerPlayerId];
-                        this.refreshTakenRolesFromPlayers();
-                        this.rebuildBotSlots();
-                        this.renderLobbyRoles();
-                        this.renderPlayersList();
-                        this.broadcastRoomState();
+                        this.handlePlayerRemoved(conn.peerPlayerId);
                     }
                 });
             });
@@ -462,12 +602,18 @@ const MP = {
             }
 
             conn.peerPlayerId = incomingId;
-            this.players[incomingId] = { ...data.player, roleId: finalRoleId, isBot: false };
+            this.players[incomingId] = {
+                ...data.player,
+                roleId: finalRoleId,
+                isBot: false,
+                lastSeen: performance.now()
+            };
 
             this.refreshTakenRolesFromPlayers();
             this.rebuildBotSlots();
             this.renderLobbyRoles();
             this.renderPlayersList();
+            this.showNetworkToast(`🛰️ ${data.player.name} se unió a la tripulación.`, false);
 
             const welcomePayload = {
                 type: 'ROOM_STATE',
@@ -478,14 +624,20 @@ const MP = {
             if (conn.open) conn.send(welcomePayload);
             this.broadcastRoomState();
 
-        } else if (data.type === 'MOVE') {
+        } else if (data.type === 'MOVE' || data.type === 'HEARTBEAT') {
             if (this.players[data.id]) {
-                Object.assign(this.players[data.id], data.pos);
+                Object.assign(this.players[data.id], data.pos, { lastSeen: performance.now() });
                 this.refreshTakenRolesFromPlayers();
             }
             this.guestConns.forEach(c => {
                 if (c !== conn && c.open) c.send(data);
             });
+
+        } else if (data.type === 'PLAYER_LEAVE') {
+            this.guestConns = this.guestConns.filter(c => c !== conn);
+            if (this.players[data.id]) {
+                this.handlePlayerRemoved(data.id);
+            }
 
         } else if (data.type === 'TASK_DONE') {
             this.reportTaskCompleted(data.roleId, data.taskId);
@@ -602,7 +754,24 @@ const MP = {
 
                     this.maxPlayers = data.maxPlayers;
                     const myLocal = this.players[this.myId];
-                    this.players = data.players;
+
+                    // Detectar si algún jugador desapareció respecto a nuestro estado anterior
+                    const prevIds = Object.keys(this.players);
+                    const nextPlayers = data.players || {};
+                    const now = performance.now();
+                    Object.values(nextPlayers).forEach(np => {
+                        np.lastSeen = now;
+                    });
+
+                    prevIds.forEach(oldId => {
+                        if (oldId !== this.myId && !nextPlayers[oldId] && this.players[oldId]) {
+                            const gone = this.players[oldId];
+                            const rObj = GAME_DATA.roles.find(r => r.id === gone.roleId);
+                            this.showNetworkToast(`⚠️ ${gone.name} (${rObj ? rObj.short : 'Tripulante'}) salió de la partida. Misiones actualizadas.`);
+                        }
+                    });
+
+                    this.players = nextPlayers;
 
                     if (this.players[this.myId] && this.players[this.myId].roleId) {
                         const assignedRole = GAME_DATA.roles.find(r => r.id === this.players[this.myId].roleId);
@@ -620,6 +789,11 @@ const MP = {
 
                     this.refreshTakenRolesFromPlayers();
                     this.renderLobbyRoles();
+                    this.renderPlayersList();
+
+                    if (typeof onRemoteTaskStateUpdated === 'function') {
+                        onRemoteTaskStateUpdated();
+                    }
 
                     if (data.missionId) {
                         GAME_STATE.selectedMission = GAME_DATA.missions.find(m => m.id === data.missionId) || GAME_STATE.selectedMission;
@@ -636,10 +810,15 @@ const MP = {
                     this.updateHudBadge();
                     if (typeof lockGamePointer === 'function') lockGamePointer();
 
-                } else if (data.type === 'MOVE') {
+                } else if (data.type === 'MOVE' || data.type === 'HEARTBEAT') {
                     if (data.id !== this.myId && this.players[data.id]) {
-                        Object.assign(this.players[data.id], data.pos);
+                        Object.assign(this.players[data.id], data.pos, { lastSeen: performance.now() });
                         this.refreshTakenRolesFromPlayers();
+                    }
+
+                } else if (data.type === 'PLAYER_LEAVE') {
+                    if (data.id !== this.myId && this.players[data.id]) {
+                        this.handlePlayerRemoved(data.id);
                     }
 
                 } else if (data.type === 'TASK_STATE') {
@@ -651,6 +830,7 @@ const MP = {
                 } else if (data.type === 'LAUNCH') {
                     if (data.players) {
                         this.players = data.players;
+                        Object.values(this.players).forEach(p => { p.lastSeen = performance.now(); });
                     }
                     this.resetMissionTaskState();
                     GAME_STATE.selectedMission = GAME_DATA.missions.find(m => m.id === data.missionId) || GAME_STATE.selectedMission;
@@ -660,7 +840,18 @@ const MP = {
 
             conn.on('close', () => {
                 if (joinedOk) {
-                    document.getElementById('net-status-badge').innerText = '● Desconectado del anfitrión';
+                    document.getElementById('net-status-badge').innerText = '● Anfitrión desconectado (Modo Individual)';
+                    Object.keys(this.players).forEach(pid => {
+                        if (pid !== this.myId) delete this.players[pid];
+                    });
+                    this.isHost = true;
+                    this.maxPlayers = 1;
+                    this.refreshTakenRolesFromPlayers();
+                    this.renderPlayersList();
+                    this.showNetworkToast('⚠️ El anfitrión cerró la sala. Misiones desbloqueadas para modo individual.');
+                    if (typeof onRemoteTaskStateUpdated === 'function') {
+                        onRemoteTaskStateUpdated();
+                    }
                 }
             });
         });
@@ -680,15 +871,16 @@ const MP = {
     },
 
     sendMyPosition(x, y, z, rotY, moving) {
+        const now = performance.now();
         if (this.players[this.myId]) {
             Object.assign(this.players[this.myId], {
                 x, y, z, rotY, moving,
+                lastSeen: now,
                 name: this.myName,
                 characterId: GAME_STATE.selectedCharacterId,
                 roleId: GAME_STATE.selectedRole.id
             });
         }
-        const now = performance.now();
         if (now - this.lastSendTime < 45) return;
         this.lastSendTime = now;
 
