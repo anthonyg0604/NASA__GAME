@@ -65,15 +65,21 @@ function unlockGamePointer() {
 }
 
 function updatePointerLockStatusHint() {
-    const bar = document.querySelector('.controls-bar');
+    const bar = document.getElementById('cc-controls-bar');
     if (!bar) return;
+    const ccHidden = document.getElementById('control-center-container').classList.contains('hidden');
+    if (ccHidden) {
+        bar.classList.add('hidden');
+        return;
+    }
+    bar.classList.remove('hidden');
     const locked = !!document.pointerLockElement;
     bar.innerHTML = `
         <span><kbd>WASD</kbd> / <kbd>Flechas</kbd> Moverse</span>
         <span><kbd>Espacio</kbd> Saltar</span>
         <span><kbd>Shift</kbd> Correr</span>
         <span><kbd>E</kbd> Interactuar</span>
-        <span><kbd>ESC</kbd> ${locked ? 'Mostrar Ratón' : 'Ocultar Ratón / Cámara Libre'}</span>
+        <span><kbd>ESC</kbd> ${locked ? 'Mostrar Ratón' : 'Ocultar Ratón'}</span>
     `;
 }
 
@@ -444,14 +450,15 @@ function setupControlCenterEvents(container) {
         updatePointerLockStatusHint();
     });
 
+    // Sensibilidad de cámara suave (0.0014) para evitar giros bruscos
     window.addEventListener('mousemove', e => {
         if (!document.pointerLockElement || isAnyGameModalOpen()) return;
-        const dx = e.movementX || 0;
+        const dx = Math.max(-60, Math.min(60, e.movementX || 0));
         const ccHidden = document.getElementById('control-center-container').classList.contains('hidden');
         if (!ccHidden) {
-            camYaw -= dx * 0.0032;
+            camYaw -= dx * 0.0014;
         } else if (typeof arenaPhase !== 'undefined' && arenaPhase === 'base_ops') {
-            baseCamYaw -= dx * 0.0032;
+            baseCamYaw -= dx * 0.0014;
         }
     });
 
@@ -486,7 +493,7 @@ function setupControlCenterEvents(container) {
         ccKeys[e.code] = true;
 
         if (e.code === 'Space' && !isModalOpen && astroGrounded) {
-            astroVelY = 0.24;
+            astroVelY = 0.22;
             astroGrounded = false;
         }
         if (e.code === 'KeyE' && !isModalOpen && activeStation) {
@@ -559,7 +566,7 @@ function renderPlanetStationUI(body) {
     body.innerHTML = `
         <p style="color:#cbd5e1; font-size:0.88rem; margin-bottom:12px;">
             ${canChoose
-                ? 'Selecciona el destino planetario para toda la tripulación. Cada planeta aumenta la intensidad de meteoritos y la recompensa.'
+                ? 'Selecciona el destino planetario para toda la tripulación. Cada planeta tiene desafíos y minijuegos científicos distintos.'
                 : 'Solo el Anfitrión de la sala puede cambiar el destino planetario.'}
         </p>
         <div class="option-grid">
@@ -596,10 +603,11 @@ function renderProtocolStationUI(body) {
     MP.refreshTakenRolesFromPlayers();
     const currentRole = GAME_STATE.selectedRole;
     const currentProto = GAME_STATE.selectedSuitProtocol || GAME_DATA.suitProtocols[0];
+    const previewTasks = getMissionTasksForRole(GAME_STATE.selectedMission.id, currentRole.id, MP.roomCode);
 
     body.innerHTML = `
         <p style="color:#cbd5e1; font-size:0.86rem; margin-bottom:10px;">
-            Configura el <strong>protocolo técnico de tu traje EVA</strong> y revisa las <strong>5 terminales específicas</strong> asignadas a tu especialidad.
+            Configura el <strong>protocolo técnico de tu traje EVA</strong> y revisa las <strong>5 terminales asignadas en ${GAME_STATE.selectedMission.name}</strong>.
         </p>
 
         <div class="section-label">1. Protocolo de Soporte Vital del Traje EVA</div>
@@ -630,9 +638,9 @@ function renderProtocolStationUI(body) {
             }).join('')}
         </div>
 
-        <div class="section-label">3. Tus 5 Terminales Asignadas en el Complejo</div>
+        <div class="section-label">3. Tus 5 Terminales Asignadas en ${GAME_STATE.selectedMission.name}</div>
         <div class="task-preview-list">
-            ${currentRole.tasks.map((t, idx) => `
+            ${previewTasks.map((t, idx) => `
                 <div>
                     <strong>${idx + 1}. ${t.title}</strong> — <span style="color:${currentRole.colorCss};">${t.roomName}</span>
                 </div>
@@ -690,7 +698,7 @@ function renderLaunchStationUI(body) {
                 const pr = GAME_DATA.roles.find(x => x.id === p.roleId) || GAME_DATA.roles[0];
                 const pc = GAME_DATA.characters.find(x => x.id === p.characterId) || GAME_DATA.characters[0];
                 return `
-                    <div class="player-slot-row">
+                    <div class="player-slot-row" style="cursor:default;">
                         <span><strong>${p.name}</strong> (${pc.shortName})</span>
                         <span style="color:${pr.colorCss}; font-weight:700;">${pr.short}</span>
                     </div>
@@ -911,6 +919,7 @@ function beginMissionLaunch(fromRemote) {
     setTimeout(() => {
         ccContainer.classList.remove('shaking');
         ccContainer.classList.add('hidden');
+        updatePointerLockStatusHint();
         if (ccAnimId) {
             cancelAnimationFrame(ccAnimId);
             ccAnimId = null;
@@ -926,12 +935,14 @@ function returnToControlCenter() {
     document.getElementById('arena-container').classList.add('hidden');
     document.getElementById('report-modal').classList.add('hidden');
     document.getElementById('planet-task-modal').classList.add('hidden');
+    document.getElementById('sector-radar-box').classList.add('hidden');
     document.getElementById('control-center-container').classList.remove('hidden');
 
     GAME_STATE.currentOrbitId = 'earth';
     updateWindowPlanet('earth');
     updateCreditsHUD();
     updateTopMissionBadge();
+    updatePointerLockStatusHint();
     lockGamePointer();
 
     ccLastTime = performance.now();
@@ -965,7 +976,7 @@ function animateControlCenter(now) {
             if (ccKeys['KeyA'] || ccKeys['ArrowLeft']) strafe -= 1;
             if (ccKeys['KeyD'] || ccKeys['ArrowRight']) strafe += 1;
 
-            const speed = (ccKeys['ShiftLeft'] || ccKeys['ShiftRight']) ? 0.15 : 0.095;
+            const speed = (ccKeys['ShiftLeft'] || ccKeys['ShiftRight']) ? 0.11 : 0.07;
             if (forward !== 0 || strafe !== 0) {
                 moving = true;
                 const sinY = Math.sin(camYaw);
@@ -999,7 +1010,7 @@ function animateControlCenter(now) {
             astroRig.leftArm.rotation.x = -0.6;
             astroRig.rightArm.rotation.x = -0.6;
         } else if (moving) {
-            const swing = Math.sin(elapsed * 11) * 0.52;
+            const swing = Math.sin(elapsed * 10) * 0.48;
             astroRig.leftLeg.rotation.x = swing;
             astroRig.rightLeg.rotation.x = -swing;
             astroRig.leftArm.rotation.x = -swing;
