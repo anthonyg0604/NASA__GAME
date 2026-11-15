@@ -11,20 +11,37 @@ function getPersistentClientId() {
     }
 }
 
+const PEER_ICE_CONFIG = {
+    debug: 1,
+    config: {
+        iceServers: [
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:stun1.l.google.com:19302' },
+            { urls: 'stun:stun2.l.google.com:19302' },
+            { urls: 'stun:global.stun.twilio.com:3478' }
+        ]
+    }
+};
+
 const MP = {
     isHost: true,
     roomCode: '',
     maxPlayers: 4,
     myId: getPersistentClientId(),
     myName: 'Pablo',
-    fillWithBots: false, // Desactivado por defecto para que no aparezcan muñecos IA no deseados
+    fillWithBots: false,
     peer: null,
     hostConn: null,
     guestConns: [],
-    players: {}, // id -> { id, name, characterId, roleId, isBot, x, y, z, rotY, moving }
+    players: {},
     lastSendTime: 0,
 
     initLobbyUI() {
+        const initChar = GAME_DATA.characters.find(c => c.id === GAME_STATE.selectedCharacterId) || GAME_DATA.characters[0];
+        this.myName = initChar.shortName;
+        const nameInput = document.getElementById('player-name-input');
+        if (nameInput) nameInput.value = this.myName;
+
         this.roomCode = String(Math.floor(1000 + Math.random() * 9000));
         document.getElementById('generated-room-code').innerText = this.roomCode;
 
@@ -46,10 +63,13 @@ const MP = {
             };
         });
 
-        document.getElementById('player-name-input').oninput = e => {
-            this.myName = e.target.value.trim() || 'Tripulante';
+        nameInput.oninput = e => {
+            this.myName = e.target.value.trim() || initChar.shortName;
             this.syncLocalPlayerEntry();
             this.renderPlayersList();
+            if (typeof rebuildControlCenterAstronaut === 'function' && astroRig) {
+                rebuildControlCenterAstronaut(astroRig.group.position.clone());
+            }
             this.broadcastRoomState();
         };
 
@@ -79,20 +99,34 @@ const MP = {
             document.getElementById('tab-create-btn').classList.remove('active');
             document.getElementById('panel-join-room').classList.remove('hidden');
             document.getElementById('panel-create-room').classList.add('hidden');
+            document.getElementById('join-feedback').innerText = '';
+            setTimeout(() => document.getElementById('join-code-input').focus(), 50);
         };
 
         document.getElementById('start-session-btn').onclick = () => {
             document.getElementById('lobby-modal').classList.add('hidden');
             this.updateHudBadge();
+            if (this.isHost && this.peer && this.peer.disconnected) {
+                try { this.peer.reconnect(); } catch (_) {}
+            }
         };
 
-        document.getElementById('connect-room-btn').onclick = () => {
-            const code = document.getElementById('join-code-input').value.trim();
-            if (code.length !== 4) {
-                document.getElementById('join-feedback').innerText = '⚠️ Escribe el código de 4 números.';
+        const triggerJoin = () => {
+            const rawCode = document.getElementById('join-code-input').value.replace(/\D/g, '').trim();
+            if (rawCode.length !== 4) {
+                document.getElementById('join-feedback').style.color = '#fbbf24';
+                document.getElementById('join-feedback').innerText = '⚠️ Escribe el código de 4 números de la sala.';
                 return;
             }
-            this.joinRemoteRoom(code);
+            this.joinRemoteRoom(rawCode);
+        };
+
+        document.getElementById('connect-room-btn').onclick = triggerJoin;
+        document.getElementById('join-code-input').onkeydown = e => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                triggerJoin();
+            }
         };
 
         document.getElementById('room-info-pill').onclick = () => {
@@ -107,7 +141,7 @@ const MP = {
             <div class="char-card ${GAME_STATE.selectedCharacterId === c.id ? 'selected' : ''}" data-char="${c.id}">
                 <span class="color-swatch" style="background:${c.colorCss};"></span>
                 <div>
-                    <strong style="font-size:0.84rem; display:block;">${c.name}</strong>
+                    <strong style="font-size:0.86rem; display:block;">${c.name}</strong>
                     <span style="font-size:0.72rem; color:#94a3b8;">${c.species}</span>
                 </div>
             </div>
@@ -115,14 +149,15 @@ const MP = {
 
         grid.querySelectorAll('.char-card').forEach(el => {
             el.onclick = () => {
-                GAME_STATE.selectedCharacterId = el.dataset.char;
+                const chosenId = el.dataset.char;
+                const charObj = GAME_DATA.characters.find(x => x.id === chosenId) || GAME_DATA.characters[0];
+                GAME_STATE.selectedCharacterId = charObj.id;
                 GAME_STATE.saveProgress();
-                const charObj = GAME_DATA.characters.find(x => x.id === el.dataset.char);
+
                 const nameInput = document.getElementById('player-name-input');
-                if (charObj && ['Pablo', 'Uniqua (Yonicua)', 'Tyrone', 'Tasha', 'Comandante 1'].includes(nameInput.value)) {
-                    nameInput.value = charObj.name.split(' ')[0];
-                    this.myName = nameInput.value;
-                }
+                nameInput.value = charObj.shortName;
+                this.myName = charObj.shortName;
+
                 this.renderLobbyCharacters();
                 this.syncLocalPlayerEntry();
                 this.renderPlayersList();
@@ -178,7 +213,6 @@ const MP = {
         };
     },
 
-    // Garantiza que nunca se exceda maxPlayers ni se dupliquen bots
     rebuildBotSlots() {
         Object.keys(this.players).forEach(pid => {
             if (this.players[pid].isBot) delete this.players[pid];
@@ -208,7 +242,7 @@ const MP = {
             const botId = 'bot_' + i;
             this.players[botId] = {
                 id: botId,
-                name: `${char.name.split(' ')[0]} (IA)`,
+                name: `${char.shortName} (IA)`,
                 characterId: char.id,
                 roleId: role.id,
                 isBot: true,
@@ -232,7 +266,7 @@ const MP = {
             const char = GAME_DATA.characters.find(c => c.id === p.characterId) || GAME_DATA.characters[0];
             return `
                 <div class="player-slot-row">
-                    <span><span class="color-swatch" style="background:${char.colorCss}; vertical-align:middle; margin-right:6px;"></span><strong>${p.name}</strong> <small style="color:#94a3b8;">(${char.name.split(' ')[0]})</small></span>
+                    <span><span class="color-swatch" style="background:${char.colorCss}; vertical-align:middle; margin-right:6px;"></span><strong>${p.name}</strong> <small style="color:#94a3b8;">(${char.shortName})</small></span>
                     <span style="color:${role.colorCss}; font-weight:600;">${role.short}</span>
                 </div>
             `;
@@ -251,10 +285,13 @@ const MP = {
         if (this.peer) {
             try { this.peer.destroy(); } catch (_) {}
         }
+        const badge = document.getElementById('net-status-badge');
+        badge.innerText = '● Registrando sala...';
+
         try {
-            this.peer = new Peer('nasa-cubo-phora-' + this.roomCode);
+            this.peer = new Peer('nasa-cubo-phora-' + this.roomCode, PEER_ICE_CONFIG);
             this.peer.on('open', () => {
-                document.getElementById('net-status-badge').innerText = `● Sala Online #${this.roomCode}`;
+                badge.innerText = `● Sala Online #${this.roomCode}`;
             });
             this.peer.on('connection', conn => {
                 this.guestConns = this.guestConns.filter(c => c.open);
@@ -270,22 +307,31 @@ const MP = {
                     }
                 });
             });
-            this.peer.on('error', () => {
-                document.getElementById('net-status-badge').innerText = '● Modo Local Activo';
+            this.peer.on('disconnected', () => {
+                try { this.peer.reconnect(); } catch (_) {}
+            });
+            this.peer.on('error', err => {
+                if (err && err.type === 'unavailable-id') {
+                    this.roomCode = String(Math.floor(1000 + Math.random() * 9000));
+                    document.getElementById('generated-room-code').innerText = this.roomCode;
+                    this.setupHostPeer();
+                } else {
+                    badge.innerText = '● Modo Local Activo';
+                }
             });
         } catch (_) {}
     },
 
     handleHostData(conn, data) {
+        if (!data || !data.type) return;
+
         if (data.type === 'JOIN') {
             const incomingId = data.player.id;
 
-            // Si esta misma conexión tenía otro ID previo, limpiarlo
             if (conn.peerPlayerId && conn.peerPlayerId !== incomingId) {
                 delete this.players[conn.peerPlayerId];
             }
 
-            // Verificar cupo máximo de humanos sin contar bots
             const existingHumans = Object.values(this.players).filter(p => !p.isBot && p.id !== incomingId);
             if (existingHumans.length >= this.maxPlayers) {
                 if (conn.open) conn.send({ type: 'ROOM_FULL', maxPlayers: this.maxPlayers });
@@ -295,10 +341,18 @@ const MP = {
             conn.peerPlayerId = incomingId;
             this.players[incomingId] = { ...data.player, isBot: false };
 
-            // Reajustar bots estrictamente dentro del límite maxPlayers
             this.rebuildBotSlots();
             this.renderPlayersList();
+
+            const welcomePayload = {
+                type: 'ROOM_STATE',
+                maxPlayers: this.maxPlayers,
+                players: this.players,
+                missionId: GAME_STATE.selectedMission.id
+            };
+            if (conn.open) conn.send(welcomePayload);
             this.broadcastRoomState();
+
         } else if (data.type === 'MOVE') {
             if (this.players[data.id]) {
                 Object.assign(this.players[data.id], data.pos);
@@ -310,48 +364,106 @@ const MP = {
     },
 
     joinRemoteRoom(code) {
+        const feedback = document.getElementById('join-feedback');
+        const btn = document.getElementById('connect-room-btn');
+
         if (typeof Peer === 'undefined') {
-            document.getElementById('join-feedback').innerText = '❌ Librería de red no disponible.';
+            feedback.style.color = '#ef4444';
+            feedback.innerText = '❌ Error cargando red. Recarga la página con Ctrl + Shift + R.';
             return;
         }
-        document.getElementById('join-feedback').innerText = '⏳ Conectando a la nave...';
+
+        btn.disabled = true;
+        btn.innerText = '⏳ CONECTANDO...';
+        feedback.style.color = '#38bdf8';
+        feedback.innerText = `⏳ Buscando sala #${code}...`;
+
         if (this.peer) {
             try { this.peer.destroy(); } catch (_) {}
         }
-        this.peer = new Peer();
+
+        let joinedOk = false;
+        const failTimeout = setTimeout(() => {
+            if (!joinedOk) {
+                btn.disabled = false;
+                btn.innerText = '🔗 INGRESAR A LA SALA';
+                feedback.style.color = '#fbbf24';
+                feedback.innerText = `⚠️ No se pudo conectar a #${code}. Verifica que el anfitrión tenga el juego abierto y el código sea exacto.`;
+            }
+        }, 8500);
+
+        this.peer = new Peer(PEER_ICE_CONFIG);
+
+        this.peer.on('error', err => {
+            clearTimeout(failTimeout);
+            btn.disabled = false;
+            btn.innerText = '🔗 INGRESAR A LA SALA';
+            feedback.style.color = '#ef4444';
+            if (err && err.type === 'peer-unavailable') {
+                feedback.innerText = `❌ La sala #${code} no existe o el anfitrión cerró su pestaña.`;
+            } else {
+                feedback.innerText = `❌ Error de red (${err.type || 'conexión'}). Intenta nuevamente.`;
+            }
+        });
+
         this.peer.on('open', () => {
-            const conn = this.peer.connect('nasa-cubo-phora-' + code);
+            feedback.innerText = `🔗 Enlazando con la nave #${code}...`;
+            const conn = this.peer.connect('nasa-cubo-phora-' + code, { reliable: true, serialization: 'json' });
             this.hostConn = conn;
+
             conn.on('open', () => {
                 this.roomCode = code;
                 this.players = {};
                 this.syncLocalPlayerEntry();
                 conn.send({ type: 'JOIN', player: this.players[this.myId] });
             });
+
             conn.on('data', data => {
+                if (!data || !data.type) return;
+
                 if (data.type === 'ROOM_FULL') {
-                    document.getElementById('join-feedback').innerText = `⚠️ Sala llena (${data.maxPlayers}/${data.maxPlayers} jugadores).`;
+                    joinedOk = true;
+                    clearTimeout(failTimeout);
+                    btn.disabled = false;
+                    btn.innerText = '🔗 INGRESAR A LA SALA';
+                    feedback.style.color = '#fbbf24';
+                    feedback.innerText = `⚠️ Sala llena (${data.maxPlayers}/${data.maxPlayers} jugadores).`;
                     try { conn.close(); } catch (_) {}
+
                 } else if (data.type === 'ROOM_STATE') {
+                    joinedOk = true;
+                    clearTimeout(failTimeout);
+                    btn.disabled = false;
+                    btn.innerText = '🔗 INGRESAR A LA SALA';
+
                     this.maxPlayers = data.maxPlayers;
                     const myLocal = this.players[this.myId];
                     this.players = data.players;
                     if (myLocal && this.players[this.myId]) {
                         Object.assign(this.players[this.myId], myLocal);
                     }
+                    if (data.missionId) {
+                        GAME_STATE.selectedMission = GAME_DATA.missions.find(m => m.id === data.missionId) || GAME_STATE.selectedMission;
+                        if (typeof updateTopMissionBadge === 'function') updateTopMissionBadge();
+                    }
                     document.getElementById('lobby-modal').classList.add('hidden');
                     this.updateHudBadge();
+
                 } else if (data.type === 'MOVE') {
                     if (data.id !== this.myId && this.players[data.id]) {
                         Object.assign(this.players[data.id], data.pos);
                     }
+
                 } else if (data.type === 'LAUNCH') {
                     GAME_STATE.selectedMission = GAME_DATA.missions.find(m => m.id === data.missionId) || GAME_STATE.selectedMission;
                     if (typeof beginMissionLaunch === 'function') beginMissionLaunch(true);
                 }
             });
-            conn.on('error', () => {
-                document.getElementById('join-feedback').innerText = '❌ No se encontró esa sala.';
+
+            conn.on('close', () => {
+                if (joinedOk) {
+                    document.getElementById('net-status-badge').innerText = '● Desconectado del anfitrión';
+                }
             });
         });
     },
@@ -361,7 +473,8 @@ const MP = {
         const payload = {
             type: 'ROOM_STATE',
             maxPlayers: this.maxPlayers,
-            players: this.players
+            players: this.players,
+            missionId: GAME_STATE.selectedMission.id
         };
         this.guestConns.forEach(c => {
             if (c.open) c.send(payload);
@@ -372,6 +485,7 @@ const MP = {
         if (this.players[this.myId]) {
             Object.assign(this.players[this.myId], {
                 x, y, z, rotY, moving,
+                name: this.myName,
                 characterId: GAME_STATE.selectedCharacterId,
                 roleId: GAME_STATE.selectedRole.id
             });
@@ -385,6 +499,7 @@ const MP = {
             id: this.myId,
             pos: {
                 x, y, z, rotY, moving,
+                name: this.myName,
                 characterId: GAME_STATE.selectedCharacterId,
                 roleId: GAME_STATE.selectedRole.id
             }
