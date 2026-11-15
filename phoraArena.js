@@ -12,18 +12,19 @@ let shipShield = 100;
 let maxShipShield = 100;
 let flightProgress = 0;
 
-// Variables fase base planetaria 68x68 (9 salas)
+// Variables fase complejo espacial 114x114 (25 sectores tipo Backrooms)
 let baseAstroRig = null;
 let baseAstroVelY = 0;
 let baseAstroGrounded = true;
 let remoteBaseAstros = {};
 let baseColliders = [];
 let roleTerminals = [];
+let flickeringLights = [];
 let activeTerminal = null;
 var isTaskModalOpen = false;
 let completedTaskIds = new Set();
-let suitOxygen = 90;
-let maxSuitOxygen = 90;
+let suitOxygen = 135;
+let maxSuitOxygen = 135;
 var baseCamYaw = 0;
 let botTaskTimer = 0;
 
@@ -32,7 +33,6 @@ function startPhoraArena() {
     container.classList.remove('hidden');
     resetAllInputStates();
 
-    const mission = GAME_STATE.selectedMission;
     const role = GAME_STATE.selectedRole;
     const stats = GAME_STATE.getShipTotalStats();
 
@@ -40,7 +40,7 @@ function startPhoraArena() {
     shipShield = maxShipShield;
     flightProgress = 0;
 
-    maxSuitOxygen = 85 + stats.o2Bonus;
+    maxSuitOxygen = 135 + stats.o2Bonus;
     suitOxygen = maxSuitOxygen;
     completedTaskIds = new Set();
     isTaskModalOpen = false;
@@ -134,7 +134,7 @@ function resetArenaRenderer() {
     holder.innerHTML = '';
 
     arenaScene = new THREE.Scene();
-    arenaCamera = new THREE.PerspectiveCamera(58, holder.clientWidth / holder.clientHeight, 0.1, 160);
+    arenaCamera = new THREE.PerspectiveCamera(58, holder.clientWidth / holder.clientHeight, 0.1, 180);
     arenaRenderer = new THREE.WebGLRenderer({ antialias: true });
     arenaRenderer.setSize(holder.clientWidth, holder.clientHeight);
     arenaRenderer.shadowMap.enabled = true;
@@ -142,26 +142,33 @@ function resetArenaRenderer() {
 }
 
 // =========================================================================
-// COOPERACIÓN DINÁMICA SEGÚN JUGADORES EN SALA (1, 2, 3 O 4 ROLES)
+// COOPERACIÓN DINÁMICA PARA 5 MISIONES (1, 2, 3 O 4 JUGADORES + DESCONEXIONES)
 // =========================================================================
 function getTaskLockInfo(roleId, taskIndex) {
-    // Solo la Tarea 2 (índice 1) depende de que otro jugador activo complete su Tarea 1 (índice 0)
-    if (taskIndex !== 1) return { locked: false };
+    // Misiones 1, 3 y 5 (índices 0, 2, 4) siempre son independientes.
+    // Misión 2 (índice 1) y Misión 4 (índice 3) requieren cooperación si hay >= 2 roles activos.
+    if (taskIndex !== 1 && taskIndex !== 3) return { locked: false };
 
     const activeRoles = MP.getActiveRolesInMatch();
-    // Si hay 1 solo jugador, nunca se bloquea ninguna tarea
+    // Si solo queda 1 jugador (o se desconectaron los demás), nada se bloquea
     if (activeRoles.length <= 1) return { locked: false };
 
     const myIdx = activeRoles.indexOf(roleId);
     if (myIdx === -1) return { locked: false };
 
-    // Depende del jugador activo anterior en la lista (funciona para 2, 3 o 4 roles)
-    const partnerIdx = (myIdx - 1 + activeRoles.length) % activeRoles.length;
+    // Rotar dependencia entre los jugadores activos actuales
+    const partnerIdx = taskIndex === 1
+        ? (myIdx - 1 + activeRoles.length) % activeRoles.length
+        : (myIdx + 1) % activeRoles.length;
+
     const partnerRoleId = activeRoles[partnerIdx];
+    if (!partnerRoleId || partnerRoleId === roleId) return { locked: false };
+
     const partnerRole = GAME_DATA.roles.find(r => r.id === partnerRoleId);
     if (!partnerRole) return { locked: false };
 
-    const requiredTask = partnerRole.tasks[0];
+    const requiredTaskIndex = taskIndex === 1 ? 0 : 2;
+    const requiredTask = partnerRole.tasks[requiredTaskIndex];
     const partnerDoneList = MP.completedTasksByRole[partnerRoleId] || [];
     const isPartnerDone = partnerDoneList.includes(requiredTask.id);
 
@@ -172,6 +179,7 @@ function getTaskLockInfo(roleId, taskIndex) {
     return {
         locked: true,
         partnerRoleName: partnerRole.short,
+        partnerTaskIndex: requiredTaskIndex + 1,
         partnerTaskTitle: requiredTask.title
     };
 }
@@ -289,6 +297,8 @@ function animateFlightPhase(now) {
     const dt = Math.min(0.05, (tNow - arenaLastTime) / 1000);
     arenaLastTime = tNow;
 
+    MP.tickNetworkHealth();
+
     const stats = GAME_STATE.getShipTotalStats();
     const moveSpeed = 13 * stats.speedMult;
 
@@ -378,13 +388,14 @@ function animateFlightPhase(now) {
 }
 
 // =========================================================================
-// FASE 2: BASE PLANETARIA CERRADA 68x68 (9 SALAS, TECHO ALTO 11m)
+// FASE 2: COMPLEJO ESPACIAL TIPO BACKROOMS 114x114 (25 SECTORES DECORADOS)
 // =========================================================================
 function initPlanetaryBasePhase() {
     arenaPhase = 'base_ops';
     baseColliders = [];
     roleTerminals = [];
     remoteBaseAstros = {};
+    flickeringLights = [];
     baseCamYaw = 0;
 
     resetArenaRenderer();
@@ -392,10 +403,10 @@ function initPlanetaryBasePhase() {
     const mission = GAME_STATE.selectedMission;
     const role = GAME_STATE.selectedRole;
 
-    arenaScene.background = new THREE.Color(mission.skyColor);
-    arenaScene.fog = new THREE.Fog(0x070d1a, 32, 85);
+    arenaScene.background = new THREE.Color(0x040812);
+    arenaScene.fog = new THREE.Fog(0x050a16, 26, 76);
 
-    document.getElementById('arena-phase-title').innerText = `🏛️ Base en ${mission.name}`;
+    document.getElementById('arena-phase-title').innerText = `🏛️ Complejo Espacial — ${mission.name}`;
     document.getElementById('primary-bar-label').innerText = `🫁 Oxígeno Traje: 100%`;
     document.getElementById('primary-bar-fill').className = 'progress-fill green';
     document.getElementById('primary-bar-fill').style.width = '100%';
@@ -404,25 +415,9 @@ function initPlanetaryBasePhase() {
     document.getElementById('secondary-bar-fill').className = 'progress-fill cyan';
     document.getElementById('secondary-bar-fill').style.width = '0%';
 
-    arenaScene.add(new THREE.AmbientLight(0xcbd5e1, 0.85));
+    arenaScene.add(new THREE.AmbientLight(0x94a3b8, 0.72));
 
-    const roomCoords = [-22.5, 0, 22.5];
-    roomCoords.forEach(rx => {
-        roomCoords.forEach(rz => {
-            const pLight = new THREE.PointLight(mission.accentColor, 0.9, 28);
-            pLight.position.set(rx, 8.8, rz);
-            arenaScene.add(pLight);
-
-            const lamp = new THREE.Mesh(
-                new THREE.BoxGeometry(3.6, 0.25, 3.6),
-                new THREE.MeshBasicMaterial({ color: 0xe0f2fe })
-            );
-            lamp.position.set(rx, 10.8, rz);
-            arenaScene.add(lamp);
-        });
-    });
-
-    buildClosed9RoomComplex(mission);
+    buildBackroomsSpaceshipComplex(mission);
     buildRoleSpecificTerminals(role);
     refreshTerminalsVisualState();
 
@@ -443,7 +438,7 @@ function initPlanetaryBasePhase() {
     animatePlanetaryBase();
 }
 
-function addSolidWallBox(cx, cz, widthX, depthZ, heightY, wallMat, trimMat) {
+function addSolidWallBox(cx, cz, widthX, depthZ, heightY, wallMat, trimMat, topTrimMat) {
     const wall = new THREE.Mesh(
         new THREE.BoxGeometry(widthX, heightY, depthZ),
         wallMat
@@ -454,12 +449,21 @@ function addSolidWallBox(cx, cz, widthX, depthZ, heightY, wallMat, trimMat) {
     arenaScene.add(wall);
 
     if (trimMat) {
-        const trim = new THREE.Mesh(
-            new THREE.BoxGeometry(widthX + 0.06, 0.25, depthZ + 0.06),
+        const bottomTrim = new THREE.Mesh(
+            new THREE.BoxGeometry(widthX + 0.08, 0.24, depthZ + 0.08),
             trimMat
         );
-        trim.position.set(cx, 0.35, cz);
-        arenaScene.add(trim);
+        bottomTrim.position.set(cx, 0.35, cz);
+        arenaScene.add(bottomTrim);
+    }
+
+    if (topTrimMat) {
+        const upperTrim = new THREE.Mesh(
+            new THREE.BoxGeometry(widthX + 0.08, 0.18, depthZ + 0.08),
+            topTrimMat
+        );
+        upperTrim.position.set(cx, heightY - 0.85, cz);
+        arenaScene.add(upperTrim);
     }
 
     baseColliders.push({
@@ -470,104 +474,306 @@ function addSolidWallBox(cx, cz, widthX, depthZ, heightY, wallMat, trimMat) {
     });
 }
 
-function buildClosed9RoomComplex(mission) {
+function decorateSpaceshipComplex(mission, sectorCenters, wallH) {
+    const ribMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.4, metalness: 0.65 });
+    const darkRackMat = new THREE.MeshStandardMaterial({ color: 0x111827, roughness: 0.35, metalness: 0.7 });
+    const pipeMat = new THREE.MeshStandardMaterial({ color: 0x475569, roughness: 0.3, metalness: 0.8 });
+    const hazardMat = new THREE.MeshStandardMaterial({ color: 0xf59e0b, emissive: 0xb45309, emissiveIntensity: 0.35 });
+    const screenBlueMat = new THREE.MeshStandardMaterial({ color: 0x0284c7, emissive: 0x0ea5e9, emissiveIntensity: 0.65 });
+    const screenGreenMat = new THREE.MeshStandardMaterial({ color: 0x059669, emissive: 0x10b981, emissiveIntensity: 0.55 });
+    const viewportGlassMat = new THREE.MeshBasicMaterial({ color: 0x020617 });
+
+    const pillarGeo = new THREE.BoxGeometry(0.85, wallH, 0.85);
+    const rackGeo = new THREE.BoxGeometry(2.4, 3.6, 0.75);
+    const rackScreenGeo = new THREE.BoxGeometry(1.9, 1.1, 0.08);
+    const pipeGeo = new THREE.CylinderGeometry(0.14, 0.14, 21.5, 10);
+    const hazardGeo = new THREE.BoxGeometry(2.6, 0.22, 0.12);
+    const viewportFrameGeo = new THREE.BoxGeometry(6.4, 2.6, 0.28);
+    const viewportGlassGeo = new THREE.BoxGeometry(5.9, 2.1, 0.32);
+
+    // 1. Pilares estructurales en las intersecciones internas de la nave (4x4 = 16 columnas maestras)
+    const wallLines = [-33.75, -11.25, 11.25, 33.75];
+    wallLines.forEach(wx => {
+        wallLines.forEach(wz => {
+            const col = new THREE.Mesh(pillarGeo, ribMat);
+            col.position.set(wx, wallH / 2, wz);
+            arenaScene.add(col);
+
+            const ring = new THREE.Mesh(
+                new THREE.BoxGeometry(1.02, 0.32, 1.02),
+                new THREE.MeshBasicMaterial({ color: mission.accentColor })
+            );
+            ring.position.set(wx, 2.4, wz);
+            arenaScene.add(ring);
+
+            baseColliders.push({
+                minX: wx - 0.9,
+                maxX: wx + 0.9,
+                minZ: wz - 0.9,
+                maxZ: wz + 0.9
+            });
+        });
+    });
+
+    // 2. Tuberías superiores y luces de techo tipo Backrooms en los 25 sectores
+    sectorCenters.forEach((sx, ix) => {
+        sectorCenters.forEach((sz, iz) => {
+            // Luminaria fluorescente empotrada en techo
+            const isFlicker = (ix + iz) % 5 === 2;
+            const lampMat = new THREE.MeshBasicMaterial({ color: isFlicker ? 0xfef08a : 0xe0f2fe });
+            const lamp = new THREE.Mesh(new THREE.BoxGeometry(4.2, 0.22, 1.4), lampMat);
+            lamp.position.set(sx, wallH - 0.05, sz);
+            arenaScene.add(lamp);
+
+            // Solo iluminar estratégicamente para mantener 60 FPS fluidos
+            if ((ix + iz) % 2 === 0) {
+                const pLight = new THREE.PointLight(isFlicker ? 0xfde047 : mission.accentColor, 0.85, 34);
+                pLight.position.set(sx, wallH - 1.5, sz);
+                arenaScene.add(pLight);
+                if (isFlicker) {
+                    flickeringLights.push({ light: pLight, mesh: lamp, seed: ix * 7 + iz * 13 });
+                }
+            }
+
+            // Tuberías industriales paralelas cerca del techo
+            const pipeX = new THREE.Mesh(pipeGeo, pipeMat);
+            pipeX.rotation.z = Math.PI / 2;
+            pipeX.position.set(sx, wallH - 1.15, sz - 8.8);
+            arenaScene.add(pipeX);
+
+            const pipeZ = new THREE.Mesh(pipeGeo, pipeMat);
+            pipeZ.rotation.x = Math.PI / 2;
+            pipeZ.position.set(sx - 8.8, wallH - 1.45, sz);
+            arenaScene.add(pipeZ);
+
+            // Racks de servidores / consolas decorativas en esquinas libres de los sectores
+            if ((ix * 3 + iz) % 2 === 0 && !(ix === 2 && iz === 2)) {
+                const rack = new THREE.Mesh(rackGeo, darkRackMat);
+                rack.position.set(sx + 7.6, 1.8, sz + 7.6);
+                rack.rotation.y = -Math.PI / 4;
+                arenaScene.add(rack);
+
+                const scr = new THREE.Mesh(rackScreenGeo, (ix + iz) % 4 === 0 ? screenBlueMat : screenGreenMat);
+                scr.position.set(sx + 7.32, 2.35, sz + 7.32);
+                scr.rotation.y = -Math.PI / 4;
+                arenaScene.add(scr);
+
+                const haz = new THREE.Mesh(hazardGeo, hazardMat);
+                haz.position.set(sx + 7.32, 0.45, sz + 7.32);
+                haz.rotation.y = -Math.PI / 4;
+                arenaScene.add(haz);
+            }
+        });
+    });
+
+    // 3. Ventanales espaciales blindados en los muros exteriores (evitando las posiciones de terminales)
+    const windowOffsets = [-33.75, -11.25, 11.25, 33.75];
+    windowOffsets.forEach(coord => {
+        // Muro Norte y Sur
+        [-55.45, 55.45].forEach(zWall => {
+            const frame = new THREE.Mesh(viewportFrameGeo, ribMat);
+            frame.position.set(coord, 4.4, zWall);
+            arenaScene.add(frame);
+
+            const glass = new THREE.Mesh(viewportGlassGeo, viewportGlassMat);
+            glass.position.set(coord, 4.4, zWall);
+            arenaScene.add(glass);
+
+            // Estrellas visibles dentro del ventanal
+            for (let s = -2; s <= 2; s += 2) {
+                const starDot = new THREE.Mesh(
+                    new THREE.SphereGeometry(0.08, 6, 6),
+                    new THREE.MeshBasicMaterial({ color: 0xe0f2fe })
+                );
+                starDot.position.set(coord + s * 0.9, 4.4 + (s % 2) * 0.4, zWall + (zWall < 0 ? 0.18 : -0.18));
+                arenaScene.add(starDot);
+            }
+        });
+
+        // Muro Oeste y Este
+        [-55.45, 55.45].forEach(xWall => {
+            const frame = new THREE.Mesh(viewportFrameGeo, ribMat);
+            frame.rotation.y = Math.PI / 2;
+            frame.position.set(xWall, 4.4, coord);
+            arenaScene.add(frame);
+
+            const glass = new THREE.Mesh(viewportGlassGeo, viewportGlassMat);
+            glass.rotation.y = Math.PI / 2;
+            glass.position.set(xWall, 4.4, coord);
+            arenaScene.add(glass);
+        });
+    });
+}
+
+function buildBackroomsSpaceshipComplex(mission) {
     const WALL_H = 11.0;
     const WALL_T = 1.4;
+    const SPAN = 112.5; // 5 sectores x 22.5 = 112.5 (-56.25 a +56.25)
 
     const floor = new THREE.Mesh(
-        new THREE.PlaneGeometry(68, 68),
-        new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.45, metalness: 0.25 })
+        new THREE.PlaneGeometry(SPAN + 4, SPAN + 4),
+        new THREE.MeshStandardMaterial({ color: 0x0b1222, roughness: 0.42, metalness: 0.35 })
     );
     floor.rotation.x = -Math.PI / 2;
     floor.receiveShadow = true;
     arenaScene.add(floor);
 
-    const grid = new THREE.GridHelper(68, 34, mission.accentColor, 0x1e293b);
+    const grid = new THREE.GridHelper(SPAN, 50, mission.accentColor, 0x1e293b);
     grid.position.y = 0.01;
     arenaScene.add(grid);
 
     const ceiling = new THREE.Mesh(
-        new THREE.BoxGeometry(70, 0.8, 70),
-        new THREE.MeshStandardMaterial({ color: 0x091122, roughness: 0.7, side: THREE.DoubleSide })
+        new THREE.BoxGeometry(SPAN + 6, 0.8, SPAN + 6),
+        new THREE.MeshStandardMaterial({ color: 0x070d1a, roughness: 0.75, side: THREE.DoubleSide })
     );
     ceiling.position.set(0, WALL_H + 0.4, 0);
     arenaScene.add(ceiling);
 
-    const outerWallMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.55, metalness: 0.2 });
-    const innerWallMat = new THREE.MeshStandardMaterial({ color: 0x263349, roughness: 0.5, metalness: 0.2 });
+    const outerWallMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.5, metalness: 0.3 });
+    const innerWallMat = new THREE.MeshStandardMaterial({ color: 0x243247, roughness: 0.48, metalness: 0.28 });
     const trimMat = new THREE.MeshBasicMaterial({ color: mission.accentColor });
+    const upperTrimMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8 });
 
-    addSolidWallBox(0, -34.2, 69.8, WALL_T, WALL_H, outerWallMat, trimMat);
-    addSolidWallBox(0, 34.2, 69.8, WALL_T, WALL_H, outerWallMat, trimMat);
-    addSolidWallBox(-34.2, 0, WALL_T, 69.8, WALL_H, outerWallMat, trimMat);
-    addSolidWallBox(34.2, 0, WALL_T, 69.8, WALL_H, outerWallMat, trimMat);
+    // 4 Muros Exteriores Blindados (±56.25)
+    addSolidWallBox(0, -56.25, SPAN + WALL_T, WALL_T, WALL_H, outerWallMat, trimMat, upperTrimMat);
+    addSolidWallBox(0, 56.25, SPAN + WALL_T, WALL_T, WALL_H, outerWallMat, trimMat, upperTrimMat);
+    addSolidWallBox(-56.25, 0, WALL_T, SPAN + WALL_T, WALL_H, outerWallMat, trimMat, upperTrimMat);
+    addSolidWallBox(56.25, 0, WALL_T, SPAN + WALL_T, WALL_H, outerWallMat, trimMat, upperTrimMat);
 
-    const doorCenters = [-22.5, 0, 22.5];
+    // Laberinto 5x5 con conectividad 100% garantizada (Árbol de expansión + corredores extra)
+    const sectorCenters = [-45, -22.5, 0, 22.5, 45];
     const doorHalf = 2.6;
 
-    function buildWallWithDoorways(isVerticalWall, fixedCoord) {
-        let cursor = -33.5;
-        doorCenters.forEach(dc => {
-            const segEnd = dc - doorHalf;
-            const segLen = segEnd - cursor;
-            if (segLen > 0.4) {
-                const segCenter = (cursor + segEnd) / 2;
-                if (isVerticalWall) {
-                    addSolidWallBox(fixedCoord, segCenter, 1.1, segLen, WALL_H, innerWallMat, trimMat);
-                } else {
-                    addSolidWallBox(segCenter, fixedCoord, segLen, 1.1, WALL_H, innerWallMat, trimMat);
-                }
+    // Conjuntos de puertas abiertas:
+    // vOpen["ix_iz"] = true si hay puerta en el muro vertical entre (ix, iz) y (ix+1, iz)
+    // hOpen["ix_iz"] = true si hay puerta en el muro horizontal entre (ix, iz) y (ix, iz+1)
+    const vOpen = {};
+    const hOpen = {};
+
+    // 1. Generar árbol de expansión determinista para garantizar que los 25 sectores estén conectados
+    const visited = Array.from({ length: 5 }, () => Array(5).fill(false));
+    function carveMaze(cx, cz) {
+        visited[cx][cz] = true;
+        const dirs = [
+            { dx: 1, dz: 0, order: (cx * 7 + cz * 3) % 4 },
+            { dx: -1, dz: 0, order: (cx * 5 + cz * 11) % 4 },
+            { dx: 0, dz: 1, order: (cx * 13 + cz * 2) % 4 },
+            { dx: 0, dz: -1, order: (cx * 3 + cz * 17) % 4 }
+        ].sort((a, b) => a.order - b.order);
+
+        dirs.forEach(d => {
+            const nx = cx + d.dx;
+            const nz = cz + d.dz;
+            if (nx >= 0 && nx < 5 && nz >= 0 && nz < 5 && !visited[nx][nz]) {
+                if (d.dx === 1) vOpen[`${cx}_${cz}`] = true;
+                if (d.dx === -1) vOpen[`${nx}_${cz}`] = true;
+                if (d.dz === 1) hOpen[`${cx}_${cz}`] = true;
+                if (d.dz === -1) hOpen[`${cx}_${nz}`] = true;
+                carveMaze(nx, nz);
             }
-            const lintel = new THREE.Mesh(
-                isVerticalWall
-                    ? new THREE.BoxGeometry(1.1, WALL_H - 4.6, doorHalf * 2)
-                    : new THREE.BoxGeometry(doorHalf * 2, WALL_H - 4.6, 1.1),
-                innerWallMat
-            );
-            lintel.position.set(
-                isVerticalWall ? fixedCoord : dc,
-                4.6 + (WALL_H - 4.6) / 2,
-                isVerticalWall ? dc : fixedCoord
-            );
-            arenaScene.add(lintel);
-
-            cursor = dc + doorHalf;
         });
+    }
+    carveMaze(2, 2);
 
-        const lastLen = 33.5 - cursor;
-        if (lastLen > 0.4) {
-            const lastCenter = (cursor + 33.5) / 2;
-            if (isVerticalWall) {
-                addSolidWallBox(fixedCoord, lastCenter, 1.1, lastLen, WALL_H, innerWallMat, trimMat);
-            } else {
-                addSolidWallBox(lastCenter, fixedCoord, lastLen, 1.1, WALL_H, innerWallMat, trimMat);
+    // 2. Abrir bucles adicionales (~50% de muros restantes) para crear rutas alternativas estilo Backrooms
+    for (let ix = 0; ix < 4; ix++) {
+        for (let iz = 0; iz < 5; iz++) {
+            if ((ix + iz) % 2 === 0 || (ix === 1 && iz === 2) || (ix === 2 && iz === 2)) {
+                vOpen[`${ix}_${iz}`] = true;
+            }
+        }
+    }
+    for (let ix = 0; ix < 5; ix++) {
+        for (let iz = 0; iz < 4; iz++) {
+            if ((ix * 2 + iz) % 2 === 1 || (ix === 2 && iz === 1) || (ix === 2 && iz === 2)) {
+                hOpen[`${ix}_${iz}`] = true;
             }
         }
     }
 
-    buildWallWithDoorways(true, -11);
-    buildWallWithDoorways(true, 11);
-    buildWallWithDoorways(false, -11);
-    buildWallWithDoorways(false, 11);
+    // Construir los 4 muros internos verticales (x = -33.75, -11.25, 11.25, 33.75)
+    for (let ix = 0; ix < 4; ix++) {
+        const wallX = -33.75 + ix * 22.5;
+        for (let iz = 0; iz < 5; iz++) {
+            const centerZ = sectorCenters[iz];
+            const segStart = centerZ - 11.25;
+            const segEnd = centerZ + 11.25;
 
-    const roomSigns = [
-        { text: 'CAFETERÍA CENTRAL', x: 0, z: 0 },
-        { text: 'PUENTE DE NAVEGACIÓN (NORTE)', x: 0, z: -22.5 },
-        { text: 'ARMERÍA Y ESCUDOS (NOROESTE)', x: -22.5, z: -22.5 },
-        { text: 'SOPORTE VITAL O2 (NORESTE)', x: 22.5, z: -22.5 },
-        { text: 'SALA DEL REACTOR (OESTE)', x: -22.5, z: 0 },
-        { text: 'LABORATORIO MEDBAY (ESTE)', x: 22.5, z: 0 },
-        { text: 'SALA ELÉCTRICA (SUROESTE)', x: -22.5, z: 22.5 },
-        { text: 'COMUNICACIONES (SUR)', x: 0, z: 22.5 },
-        { text: 'BAHÍA DE CARGA / MOTORES (SURESTE)', x: 22.5, z: 22.5 }
+            if (vOpen[`${ix}_${iz}`]) {
+                // Muro con compuerta abierta
+                const leftLen = (centerZ - doorHalf) - segStart;
+                const rightLen = segEnd - (centerZ + doorHalf);
+                addSolidWallBox(wallX, segStart + leftLen / 2, 1.1, leftLen, WALL_H, innerWallMat, trimMat, upperTrimMat);
+                addSolidWallBox(wallX, (centerZ + doorHalf) + rightLen / 2, 1.1, rightLen, WALL_H, innerWallMat, trimMat, upperTrimMat);
+
+                const lintel = new THREE.Mesh(new THREE.BoxGeometry(1.1, WALL_H - 4.8, doorHalf * 2), innerWallMat);
+                lintel.position.set(wallX, 4.8 + (WALL_H - 4.8) / 2, centerZ);
+                arenaScene.add(lintel);
+
+                const doorFrameGlow = new THREE.Mesh(
+                    new THREE.BoxGeometry(1.22, 0.22, doorHalf * 2),
+                    new THREE.MeshBasicMaterial({ color: 0x38bdf8 })
+                );
+                doorFrameGlow.position.set(wallX, 4.85, centerZ);
+                arenaScene.add(doorFrameGlow);
+            } else {
+                // Mamparo cerrado completo (obliga a rodear por el laberinto)
+                addSolidWallBox(wallX, centerZ, 1.1, 22.5, WALL_H, innerWallMat, trimMat, upperTrimMat);
+            }
+        }
+    }
+
+    // Construir los 4 muros internos horizontales (z = -33.75, -11.25, 11.25, 33.75)
+    for (let iz = 0; iz < 4; iz++) {
+        const wallZ = -33.75 + iz * 22.5;
+        for (let ix = 0; ix < 5; ix++) {
+            const centerX = sectorCenters[ix];
+            const segStart = centerX - 11.25;
+            const segEnd = centerX + 11.25;
+
+            if (hOpen[`${ix}_${iz}`]) {
+                const leftLen = (centerX - doorHalf) - segStart;
+                const rightLen = segEnd - (centerX + doorHalf);
+                addSolidWallBox(segStart + leftLen / 2, wallZ, leftLen, 1.1, WALL_H, innerWallMat, trimMat, upperTrimMat);
+                addSolidWallBox((centerX + doorHalf) + rightLen / 2, wallZ, rightLen, 1.1, WALL_H, innerWallMat, trimMat, upperTrimMat);
+
+                const lintel = new THREE.Mesh(new THREE.BoxGeometry(doorHalf * 2, WALL_H - 4.8, 1.1), innerWallMat);
+                lintel.position.set(centerX, 4.8 + (WALL_H - 4.8) / 2, wallZ);
+                arenaScene.add(lintel);
+
+                const doorFrameGlow = new THREE.Mesh(
+                    new THREE.BoxGeometry(doorHalf * 2, 0.22, 1.22),
+                    new THREE.MeshBasicMaterial({ color: 0x38bdf8 })
+                );
+                doorFrameGlow.position.set(centerX, 4.85, wallZ);
+                arenaScene.add(doorFrameGlow);
+            } else {
+                addSolidWallBox(centerX, wallZ, 22.5, 1.1, WALL_H, innerWallMat, trimMat, upperTrimMat);
+            }
+        }
+    }
+
+    // Decoraciones detalladas de nave espacial en todos los corredores y muros
+    decorateSpaceshipComplex(mission, sectorCenters, WALL_H);
+
+    // Letreros superiores de los 25 sectores
+    const sectorNames = [
+        ['ESCUDOS (NW)', 'ENLACE SATELITAL', 'PUENTE PRINCIPAL (N)', 'GIROSCOPIOS', 'CRIOGENIA (NE)'],
+        ['REFRIGERACIÓN', 'CORREDOR ALFA-2', 'TIMÓN CENTRAL-N', 'CORREDOR BETA-2', 'INVERNADERO LED'],
+        ['REACTOR (W)', 'BALIZA CENTRAL', 'NÚCLEO CENTRAL', 'ANALIZADOR ATMO', 'LABORATORIO (E)'],
+        ['CORREDOR GAMMA-4', 'PASILLO SUR-OESTE', 'TURBINAS CENTRAL-S', 'PASILLO SUR-ESTE', 'RADAR ESPACIAL'],
+        ['SUBESTACIÓN (SW)', 'ESCÁNER GEOLÓGICO', 'ANTENAS SUR (S)', 'BAHÍA AUXILIAR', 'PROPULSORES (SE)']
     ];
 
-    roomSigns.forEach(rs => {
-        const sprite = createConsoleLabelSprite(rs.text, '#38bdf8');
-        sprite.scale.set(5.4, 1.15, 1);
-        sprite.position.set(rs.x, 7.6, rs.z);
-        arenaScene.add(sprite);
-    });
+    for (let iz = 0; iz < 5; iz++) {
+        for (let ix = 0; ix < 5; ix++) {
+            const label = sectorNames[iz][ix];
+            const sprite = createConsoleLabelSprite(label, '#38bdf8');
+            sprite.scale.set(5.4, 1.15, 1);
+            sprite.position.set(sectorCenters[ix], 7.8, sectorCenters[iz]);
+            arenaScene.add(sprite);
+        }
+    }
 }
 
 function buildRoleSpecificTerminals(role) {
@@ -622,7 +828,7 @@ function updateBaseCompassHint() {
     if (!hintEl) return;
 
     if (pending.length === 0) {
-        hintEl.innerHTML = '✅ <b>¡Todas tus tareas completadas!</b> Preparando regreso orbital...';
+        hintEl.innerHTML = '✅ <b>¡Tus 5 tareas completadas!</b> Preparando regreso orbital...';
         return;
     }
 
@@ -630,11 +836,11 @@ function updateBaseCompassHint() {
     const unlockedTask = pending.find(t => !getTaskLockInfo(myRoleId, t.taskIndex).locked);
 
     if (unlockedTask) {
-        hintEl.innerHTML = `🎯 Objetivo disponible (${pending.length}): <b>${unlockedTask.title}</b> en <b>${unlockedTask.roomName}</b> • <b>[E]</b> Operar`;
+        hintEl.innerHTML = `🎯 Pendientes (${pending.length}/5): <b>${unlockedTask.title}</b> en <b>${unlockedTask.roomName}</b> • <b>[E]</b> Operar`;
     } else {
         const blocked = pending[0];
         const lockInfo = getTaskLockInfo(myRoleId, blocked.taskIndex);
-        hintEl.innerHTML = `🔒 <b>${blocked.title}</b> espera a que <b>${lockInfo.partnerRoleName}</b> complete su Tarea 1`;
+        hintEl.innerHTML = `🔒 <b>${blocked.title}</b> espera a que <b>${lockInfo.partnerRoleName}</b> complete su Tarea ${lockInfo.partnerTaskIndex}`;
     }
 }
 
@@ -655,14 +861,14 @@ function resolveBaseWallCollisions(pos) {
             else if (minOverlap === overlapBottom) pos.z = box.maxZ + r;
         }
     }
-    pos.x = Math.max(-32.8, Math.min(32.8, pos.x));
-    pos.z = Math.max(-32.8, Math.min(32.8, pos.z));
+    pos.x = Math.max(-55.0, Math.min(55.0, pos.x));
+    pos.z = Math.max(-55.0, Math.min(55.0, pos.z));
 }
 
 function clampBaseCameraInsideWalls(camPos, targetPos) {
     camPos.y = Math.min(9.2, Math.max(1.8, camPos.y));
-    camPos.x = Math.max(-32.6, Math.min(32.6, camPos.x));
-    camPos.z = Math.max(-32.6, Math.min(32.6, camPos.z));
+    camPos.x = Math.max(-54.8, Math.min(54.8, camPos.x));
+    camPos.z = Math.max(-54.8, Math.min(54.8, camPos.z));
 
     const steps = 8;
     for (let s = 1; s <= steps; s++) {
@@ -682,12 +888,11 @@ function clampBaseCameraInsideWalls(camPos, targetPos) {
 }
 
 function syncBaseRemoteAstronauts(elapsed, dt) {
-    MP.updateBots(dt, 28);
+    MP.updateBots(dt, 48);
 
-    // Si el anfitrión juega con bots IA, los bots completan sus tareas periódicamente para desbloquear cooperación
     if (MP.isHost) {
         botTaskTimer += dt;
-        if (botTaskTimer >= 9) {
+        if (botTaskTimer >= 8) {
             botTaskTimer = 0;
             Object.values(MP.players).forEach(p => {
                 if (!p.isBot) return;
@@ -761,6 +966,15 @@ function animatePlanetaryBase(now) {
     arenaLastTime = tNow;
     const elapsed = tNow * 0.001;
 
+    MP.tickNetworkHealth();
+
+    // Efecto sutil de parpadeo tipo Backrooms en luces seleccionadas
+    flickeringLights.forEach(fl => {
+        const wave = Math.sin(elapsed * 19 + fl.seed) * Math.cos(elapsed * 7 + fl.seed);
+        const dim = wave > 0.78 ? 0.25 : 0.85;
+        fl.light.intensity = dim;
+    });
+
     if (!isTaskModalOpen) {
         suitOxygen = Math.max(0, suitOxygen - dt);
         const o2Pct = Math.round((suitOxygen / maxSuitOxygen) * 100);
@@ -772,7 +986,7 @@ function animatePlanetaryBase(now) {
         if (suitOxygen <= 0) {
             stopArenaLoop();
             unlockGamePointer();
-            showMissionReport(false, 'Se agotó el oxígeno de tu traje espacial en la base. Equipa alas o fuselaje de largo alcance para mayor reserva.');
+            showMissionReport(false, 'Se agotó el oxígeno de tu traje espacial en el complejo. Equipa alas o fuselaje de largo alcance para mayor reserva.');
             return;
         }
     }
@@ -794,7 +1008,7 @@ function animatePlanetaryBase(now) {
             if (arenaKeys['KeyA'] || arenaKeys['ArrowLeft']) strafe -= 1;
             if (arenaKeys['KeyD'] || arenaKeys['ArrowRight']) strafe += 1;
 
-            const speed = (arenaKeys['ShiftLeft'] || arenaKeys['ShiftRight']) ? 0.21 : 0.14;
+            const speed = (arenaKeys['ShiftLeft'] || arenaKeys['ShiftRight']) ? 0.24 : 0.16;
             if (forward !== 0 || strafe !== 0) {
                 moving = true;
                 const sinY = Math.sin(baseCamYaw);
@@ -863,7 +1077,7 @@ function animatePlanetaryBase(now) {
         if (activeTerminal && !isTaskModalOpen) {
             const lockInfo = getTaskLockInfo(GAME_STATE.selectedRole.id, activeTerminal.taskIndex);
             if (lockInfo.locked) {
-                promptBtn.innerHTML = `🔒 Bloqueado: Espera a que <strong>${lockInfo.partnerRoleName}</strong> complete <em>${lockInfo.partnerTaskTitle}</em>`;
+                promptBtn.innerHTML = `🔒 Bloqueado: Espera a que <strong>${lockInfo.partnerRoleName}</strong> complete su Tarea ${lockInfo.partnerTaskIndex} (<em>${lockInfo.partnerTaskTitle}</em>)`;
             } else {
                 promptBtn.innerHTML = `Presiona <strong>[E]</strong> o haz clic para operar: <span id="arena-task-name">${activeTerminal.title}</span>`;
             }
@@ -940,7 +1154,6 @@ function openTaskMinigame(task) {
     title.innerText = `${task.title} — ${task.roomName}`;
     modal.classList.remove('hidden');
 
-    // Paso 1: Dato real de la NASA en 1 línea + pregunta rápida de 1 clic
     body.innerHTML = `
         <div class="minigame-box">
             <div style="background:rgba(56,189,248,0.14); border:1px solid #38bdf8; border-radius:10px; padding:10px 12px; margin-bottom:12px; font-size:0.86rem; color:#e0f2fe;">
