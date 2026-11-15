@@ -6,12 +6,11 @@ let astroGrounded = true;
 let remoteCCAstros = {};
 let stations = [];
 let activeStation = null;
-let ccKeys = {};
+var ccKeys = {};
 let isModalOpen = false;
 let camYaw = 0;
-let isDragging = false;
-let prevMouseX = 0;
 let ccLastTime = 0;
+let lastPointerUnlockAt = 0;
 
 let garageTab = 'noses';
 let garageFeedbackMsg = '';
@@ -21,10 +20,68 @@ let previewDragging = false;
 let previewPrevX = 0;
 let previewLastTime = 0;
 
+function resetAllInputStates() {
+    ccKeys = {};
+    if (typeof arenaKeys !== 'undefined') {
+        arenaKeys = {};
+    }
+}
+
+function isAnyGameModalOpen() {
+    const ids = ['lobby-modal', 'console-modal', 'planet-task-modal', 'report-modal'];
+    return ids.some(id => {
+        const el = document.getElementById(id);
+        return el && !el.classList.contains('hidden');
+    });
+}
+
+function getActiveGameCanvas() {
+    const ccHidden = document.getElementById('control-center-container').classList.contains('hidden');
+    if (!ccHidden) {
+        return document.querySelector('#webgl-canvas-container canvas');
+    }
+    return document.querySelector('#arena-webgl-container canvas');
+}
+
+function lockGamePointer() {
+    if (isAnyGameModalOpen()) return;
+    const canvas = getActiveGameCanvas();
+    if (canvas && document.pointerLockElement !== canvas && canvas.requestPointerLock) {
+        try {
+            const promise = canvas.requestPointerLock();
+            if (promise && typeof promise.catch === 'function') {
+                promise.catch(() => {});
+            }
+        } catch (_) {}
+    }
+}
+
+function unlockGamePointer() {
+    if (document.pointerLockElement && document.exitPointerLock) {
+        try {
+            document.exitPointerLock();
+        } catch (_) {}
+    }
+}
+
+function updatePointerLockStatusHint() {
+    const bar = document.querySelector('.controls-bar');
+    if (!bar) return;
+    const locked = !!document.pointerLockElement;
+    bar.innerHTML = `
+        <span><kbd>WASD</kbd> / <kbd>Flechas</kbd> Moverse</span>
+        <span><kbd>Espacio</kbd> Saltar</span>
+        <span><kbd>Shift</kbd> Correr</span>
+        <span><kbd>E</kbd> Interactuar</span>
+        <span><kbd>ESC</kbd> ${locked ? 'Mostrar Ratón' : 'Ocultar Ratón / Cámara Libre'}</span>
+    `;
+}
+
 function initControlCenter() {
     const container = document.getElementById('webgl-canvas-container');
     container.innerHTML = '';
     remoteCCAstros = {};
+    resetAllInputStates();
 
     ccScene = new THREE.Scene();
     ccScene.background = new THREE.Color(0x060b19);
@@ -56,6 +113,7 @@ function initControlCenter() {
     setupControlCenterEvents(container);
     updateCreditsHUD();
     updateTopMissionBadge();
+    updatePointerLockStatusHint();
 
     ccLastTime = performance.now();
     animateControlCenter();
@@ -180,7 +238,6 @@ function buildControlRoom() {
         ccScene.add(line);
     });
 
-    // Paredes laterales altas de la nave (9m de altura)
     [-12.5, 12.5].forEach(xWall => {
         const wall = new THREE.Mesh(
             new THREE.BoxGeometry(1.0, 9.5, 24),
@@ -199,7 +256,6 @@ function buildControlRoom() {
         }
     });
 
-    // Pared trasera
     const frontWall = new THREE.Mesh(
         new THREE.BoxGeometry(26, 9.5, 1.0),
         new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.5 })
@@ -207,7 +263,6 @@ function buildControlRoom() {
     frontWall.position.set(0, 4.75, 11.8);
     ccScene.add(frontWall);
 
-    // Techo alto de la nave (y = 9.5)
     const ceiling = new THREE.Mesh(
         new THREE.BoxGeometry(26, 0.6, 24),
         new THREE.MeshStandardMaterial({ color: 0x0b1324, roughness: 0.6 })
@@ -215,7 +270,6 @@ function buildControlRoom() {
     ceiling.position.set(0, 9.6, 0);
     ccScene.add(ceiling);
 
-    // Ventanal panorámico frontal hacia el espacio
     const backWallBottom = new THREE.Mesh(
         new THREE.BoxGeometry(26, 2.2, 0.9),
         new THREE.MeshStandardMaterial({ color: 0x1e293b })
@@ -375,10 +429,65 @@ function buildStations() {
 }
 
 function setupControlCenterEvents(container) {
+    // Bloquear clic derecho en todo el juego
+    document.addEventListener('contextmenu', e => {
+        e.preventDefault();
+    });
+
+    // Limpiar teclas si la ventana pierde foco
+    window.addEventListener('blur', () => {
+        resetAllInputStates();
+    });
+
+    // Monitorear cambios de bloqueo de ratón (Pointer Lock)
+    document.addEventListener('pointerlockchange', () => {
+        if (!document.pointerLockElement) {
+            lastPointerUnlockAt = performance.now();
+        }
+        updatePointerLockStatusHint();
+    });
+
+    // Movimiento libre de cámara al mover el mouse (sin mantener clic)
+    window.addEventListener('mousemove', e => {
+        if (!document.pointerLockElement || isAnyGameModalOpen()) return;
+        const dx = e.movementX || 0;
+        const ccHidden = document.getElementById('control-center-container').classList.contains('hidden');
+        if (!ccHidden) {
+            camYaw -= dx * 0.0032;
+        } else if (typeof arenaPhase !== 'undefined' && arenaPhase === 'base_ops') {
+            baseCamYaw -= dx * 0.0032;
+        }
+    });
+
+    // Clic en el escenario activa la cámara libre y oculta el cursor
+    container.addEventListener('mousedown', e => {
+        if (e.button === 2) return;
+        if (!isAnyGameModalOpen()) {
+            lockGamePointer();
+        }
+    });
+
     window.addEventListener('keydown', e => {
+        // Si ESC se presiona para cerrar modal o alternar cursor
+        if (e.code === 'Escape') {
+            if (isModalOpen) {
+                closeConsoleModal();
+                return;
+            }
+            if (typeof isTaskModalOpen !== 'undefined' && isTaskModalOpen) {
+                if (typeof closeTaskModal === 'function') closeTaskModal();
+                return;
+            }
+            if (!isAnyGameModalOpen() && !document.pointerLockElement) {
+                if (performance.now() - lastPointerUnlockAt > 160) {
+                    lockGamePointer();
+                }
+            }
+            return;
+        }
+
         if (document.getElementById('control-center-container').classList.contains('hidden')) return;
-        const lobbyHidden = document.getElementById('lobby-modal').classList.contains('hidden');
-        if (!lobbyHidden) return;
+        if (isAnyGameModalOpen()) return;
 
         ccKeys[e.code] = true;
 
@@ -389,29 +498,10 @@ function setupControlCenterEvents(container) {
         if (e.code === 'KeyE' && !isModalOpen && activeStation) {
             openStationModal(activeStation);
         }
-        if (e.code === 'Escape' && isModalOpen) {
-            closeConsoleModal();
-        }
     });
 
     window.addEventListener('keyup', e => {
         ccKeys[e.code] = false;
-    });
-
-    container.addEventListener('mousedown', e => {
-        isDragging = true;
-        prevMouseX = e.clientX;
-    });
-
-    window.addEventListener('mousemove', e => {
-        if (!isDragging || isModalOpen) return;
-        const dx = e.clientX - prevMouseX;
-        prevMouseX = e.clientX;
-        camYaw -= dx * 0.0065;
-    });
-
-    window.addEventListener('mouseup', () => {
-        isDragging = false;
     });
 
     document.getElementById('station-prompt').onclick = () => {
@@ -432,16 +522,21 @@ function setupControlCenterEvents(container) {
 
 function closeConsoleModal() {
     isModalOpen = false;
+    resetAllInputStates();
     document.getElementById('console-modal').classList.add('hidden');
     document.getElementById('console-modal-card').classList.remove('garage-wide');
     if (previewAnimId) {
         cancelAnimationFrame(previewAnimId);
         previewAnimId = null;
     }
+    lockGamePointer();
 }
 
 function openStationModal(station) {
     isModalOpen = true;
+    resetAllInputStates();
+    unlockGamePointer();
+
     const modal = document.getElementById('console-modal');
     const card = document.getElementById('console-modal-card');
     const title = document.getElementById('modal-title');
@@ -457,10 +552,8 @@ function openStationModal(station) {
         garageFeedbackMsg = '';
         renderGarageStationUI(body);
     } else if (station.id === 'protocol') {
-        // PANEL 3: Configuración de Traje EVA, Rol y Objetivos asignados (SIN botón de desplegar nave)
         renderProtocolStationUI(body);
     } else if (station.id === 'launch') {
-        // PANEL 4: Resumen de Misión y Botón de Ignición / Despliegue de Nave
         renderLaunchStationUI(body);
     }
 
@@ -468,34 +561,39 @@ function openStationModal(station) {
 }
 
 function renderPlanetStationUI(body) {
+    const canChoose = MP.isHost;
     body.innerHTML = `
         <p style="color:#cbd5e1; font-size:0.88rem; margin-bottom:12px;">
-            Selecciona el cuerpo celeste de destino para toda la tripulación. Cada planeta aumenta la intensidad de meteoritos y la recompensa en créditos.
+            ${canChoose
+                ? 'Selecciona el destino planetario para toda la tripulación. Cada planeta aumenta la intensidad de meteoritos y la recompensa.'
+                : 'Solo el Anfitrión de la sala puede cambiar el destino planetario.'}
         </p>
         <div class="option-grid">
             ${GAME_DATA.missions.map(m => `
-                <div class="option-card ${GAME_STATE.selectedMission.id === m.id ? 'selected' : ''}" data-mid="${m.id}">
+                <div class="option-card ${GAME_STATE.selectedMission.id === m.id ? 'selected' : ''}" data-mid="${m.id}" style="${!canChoose ? 'cursor:default;' : ''}">
                     <h4>🪐 ${m.name}</h4>
                     <p>${m.desc}</p>
                     <span class="price-badge unlocked">Dificultad: ${m.difficulty} • +${m.rewardCredits} CR</span>
                 </div>
             `).join('')}
         </div>
-        <button id="confirm-planet-btn" class="btn-primary">✓ Confirmar Rumbo Orbital</button>
+        <button id="confirm-planet-btn" class="btn-primary">✓ Confirmar y Cerrar</button>
     `;
 
-    body.querySelectorAll('.option-card').forEach(el => {
-        el.onclick = () => {
-            const found = GAME_DATA.missions.find(x => x.id === el.dataset.mid);
-            if (found) {
-                GAME_STATE.selectedMission = found;
-                updateWindowPlanet(found.id);
-                updateTopMissionBadge();
-                MP.broadcastRoomState();
-                renderPlanetStationUI(body);
-            }
-        };
-    });
+    if (canChoose) {
+        body.querySelectorAll('.option-card').forEach(el => {
+            el.onclick = () => {
+                const found = GAME_DATA.missions.find(x => x.id === el.dataset.mid);
+                if (found) {
+                    GAME_STATE.selectedMission = found;
+                    updateWindowPlanet(found.id);
+                    updateTopMissionBadge();
+                    MP.broadcastRoomState();
+                    renderPlanetStationUI(body);
+                }
+            };
+        });
+    }
 
     document.getElementById('confirm-planet-btn').onclick = closeConsoleModal;
 }
@@ -507,7 +605,7 @@ function renderProtocolStationUI(body) {
 
     body.innerHTML = `
         <p style="color:#cbd5e1; font-size:0.86rem; margin-bottom:10px;">
-            Configura el <strong>protocolo técnico de tu traje espacial EVA</strong> y verifica las <strong>3 salas específicas</strong> asignadas a tu especialidad dentro de la base planetaria.
+            Configura el <strong>protocolo técnico de tu traje EVA</strong> y revisa las <strong>3 salas específicas</strong> asignadas a tu especialidad.
         </p>
 
         <div class="section-label">1. Protocolo de Soporte Vital del Traje EVA</div>
@@ -538,7 +636,7 @@ function renderProtocolStationUI(body) {
             }).join('')}
         </div>
 
-        <div class="section-label">3. tus 3 Terminales Asignadas en el Complejo 68×68m</div>
+        <div class="section-label">3. Tus 3 Terminales Asignadas en el Complejo</div>
         <div class="task-preview-list">
             ${currentRole.tasks.map((t, idx) => `
                 <div>
@@ -547,7 +645,7 @@ function renderProtocolStationUI(body) {
             `).join('')}
         </div>
 
-        <button id="save-protocol-btn" class="btn-primary">✓ Guardar Configuración de Traje y Rol</button>
+        <button id="save-protocol-btn" class="btn-primary">✓ Guardar Configuración</button>
     `;
 
     body.querySelectorAll('[data-proto]').forEach(el => {
@@ -592,7 +690,7 @@ function renderLaunchStationUI(body) {
             <div>🚀 <strong>Bonificaciones de Nave + Traje:</strong> Velocidad ×${stats.speedMult.toFixed(2)} | Escudo +${stats.shieldBonus}% | Oxígeno +${stats.o2Bonus}s</div>
         </div>
 
-        <div class="section-label">Tripulación Lista para Despegue (${crew.length}/${MP.maxPlayers})</div>
+        <div class="section-label">Tripulación en la Nave (${crew.length}/${MP.maxPlayers})</div>
         <div class="players-list" style="margin-bottom:14px;">
             ${crew.map(p => {
                 const pr = GAME_DATA.roles.find(x => x.id === p.roleId) || GAME_DATA.roles[0];
@@ -606,16 +704,23 @@ function renderLaunchStationUI(body) {
             }).join('')}
         </div>
 
-        <p style="font-size:0.82rem; color:#94a3b8; margin-bottom:10px;">
-            Al iniciar la ignición, pilotarás la nave hacia <strong>${m.name}</strong> y luego aterrizarás en la base de 9 salas para completar tus 3 tareas únicas.
-        </p>
-
-        <button id="deploy-ship-btn" class="btn-primary">🚀 INICIAR IGNICIÓN Y DESPEGAR NAVE</button>
+        ${MP.isHost
+            ? `<p style="font-size:0.82rem; color:#94a3b8; margin-bottom:10px;">
+                   Como <strong>Anfitrión de la sala</strong>, al iniciar la ignición toda la tripulación despegará junta hacia <strong>${m.name}</strong>.
+               </p>
+               <button id="deploy-ship-btn" class="btn-primary">🚀 INICIAR IGNICIÓN Y DESPEGAR NAVE</button>`
+            : `<div style="background:rgba(245,158,11,0.15); border:1px solid #f59e0b; border-radius:10px; padding:12px; color:#fde68a; font-size:0.86rem; text-align:center; font-weight:600;">
+                   ⏳ Esperando a que el Anfitrión (creador de la sala) inicie el despegue de toda la tripulación...
+               </div>`
+        }
     `;
 
-    document.getElementById('deploy-ship-btn').onclick = () => {
-        beginMissionLaunch(false);
-    };
+    const deployBtn = document.getElementById('deploy-ship-btn');
+    if (deployBtn && MP.isHost) {
+        deployBtn.onclick = () => {
+            beginMissionLaunch(false);
+        };
+    }
 }
 
 function renderGarageStationUI(body) {
@@ -790,7 +895,18 @@ function initShipPreview3D() {
 }
 
 function beginMissionLaunch(fromRemote) {
-    closeConsoleModal();
+    if (!fromRemote && !MP.isHost) return;
+
+    isModalOpen = false;
+    resetAllInputStates();
+    document.getElementById('console-modal').classList.add('hidden');
+    document.getElementById('lobby-modal').classList.add('hidden');
+    document.getElementById('console-modal-card').classList.remove('garage-wide');
+    if (previewAnimId) {
+        cancelAnimationFrame(previewAnimId);
+        previewAnimId = null;
+    }
+
     if (!fromRemote && MP.isHost) {
         MP.broadcastLaunch();
     }
@@ -812,6 +928,7 @@ function beginMissionLaunch(fromRemote) {
 }
 
 function returnToControlCenter() {
+    resetAllInputStates();
     document.getElementById('arena-container').classList.add('hidden');
     document.getElementById('report-modal').classList.add('hidden');
     document.getElementById('planet-task-modal').classList.add('hidden');
@@ -821,6 +938,7 @@ function returnToControlCenter() {
     updateWindowPlanet('earth');
     updateCreditsHUD();
     updateTopMissionBadge();
+    lockGamePointer();
 
     ccLastTime = performance.now();
     if (!ccAnimId) animateControlCenter();
@@ -843,7 +961,7 @@ function animateControlCenter(now) {
 
     if (astroRig && astroRig.group) {
         let moving = false;
-        if (!isModalOpen && document.getElementById('lobby-modal').classList.contains('hidden')) {
+        if (!isAnyGameModalOpen()) {
             let forward = 0;
             let strafe = 0;
             if (ccKeys['KeyW'] || ccKeys['ArrowUp']) forward -= 1;
@@ -866,11 +984,9 @@ function animateControlCenter(now) {
             }
         }
 
-        // Límites interiores de la sala de control
         astroRig.group.position.x = Math.max(-10.8, Math.min(10.8, astroRig.group.position.x));
         astroRig.group.position.z = Math.max(-9.6, Math.min(10.2, astroRig.group.position.z));
 
-        // Gravedad y salto
         if (!astroGrounded) {
             astroRig.group.position.y += astroVelY;
             astroVelY -= 0.013;
@@ -907,7 +1023,6 @@ function animateControlCenter(now) {
             moving
         );
 
-        // Detectar consola cercana
         let nearest = null;
         let minDist = 3.1;
         stations.forEach(st => {
@@ -926,7 +1041,6 @@ function animateControlCenter(now) {
             promptBtn.classList.add('hidden');
         }
 
-        // Cámara tercera persona dentro de los límites de la sala
         const camDist = 7.4;
         const rawCamX = astroRig.group.position.x + Math.sin(camYaw) * camDist;
         const rawCamZ = astroRig.group.position.z + Math.cos(camYaw) * camDist;
