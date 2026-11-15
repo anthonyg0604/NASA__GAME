@@ -327,13 +327,13 @@ function updateWindowPlanet(planetId) {
 
 function createConsoleLabelSprite(text, hexColor) {
     const canvas = document.createElement('canvas');
-    canvas.width = 360;
-    canvas.height = 84;
+    canvas.width = 400;
+    canvas.height = 88;
     const ctx = canvas.getContext('2d');
 
     ctx.fillStyle = 'rgba(15, 23, 42, 0.9)';
     ctx.beginPath();
-    ctx.roundRect(10, 10, 340, 64, 14);
+    ctx.roundRect(10, 10, 380, 68, 14);
     ctx.fill();
 
     ctx.strokeStyle = hexColor;
@@ -341,13 +341,13 @@ function createConsoleLabelSprite(text, hexColor) {
     ctx.stroke();
 
     ctx.fillStyle = '#f8fafc';
-    ctx.font = 'bold 21px sans-serif';
+    ctx.font = 'bold 20px sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText(text, 180, 50);
+    ctx.fillText(text, 200, 52);
 
     const tex = new THREE.CanvasTexture(canvas);
     const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true }));
-    sprite.scale.set(3.2, 0.75, 1);
+    sprite.scale.set(3.4, 0.78, 1);
     return sprite;
 }
 
@@ -429,17 +429,14 @@ function buildStations() {
 }
 
 function setupControlCenterEvents(container) {
-    // Bloquear clic derecho en todo el juego
     document.addEventListener('contextmenu', e => {
         e.preventDefault();
     });
 
-    // Limpiar teclas si la ventana pierde foco
     window.addEventListener('blur', () => {
         resetAllInputStates();
     });
 
-    // Monitorear cambios de bloqueo de ratón (Pointer Lock)
     document.addEventListener('pointerlockchange', () => {
         if (!document.pointerLockElement) {
             lastPointerUnlockAt = performance.now();
@@ -447,7 +444,6 @@ function setupControlCenterEvents(container) {
         updatePointerLockStatusHint();
     });
 
-    // Movimiento libre de cámara al mover el mouse (sin mantener clic)
     window.addEventListener('mousemove', e => {
         if (!document.pointerLockElement || isAnyGameModalOpen()) return;
         const dx = e.movementX || 0;
@@ -459,7 +455,6 @@ function setupControlCenterEvents(container) {
         }
     });
 
-    // Clic en el escenario activa la cámara libre y oculta el cursor
     container.addEventListener('mousedown', e => {
         if (e.button === 2) return;
         if (!isAnyGameModalOpen()) {
@@ -468,7 +463,6 @@ function setupControlCenterEvents(container) {
     });
 
     window.addEventListener('keydown', e => {
-        // Si ESC se presiona para cerrar modal o alternar cursor
         if (e.code === 'Escape') {
             if (isModalOpen) {
                 closeConsoleModal();
@@ -605,7 +599,7 @@ function renderProtocolStationUI(body) {
 
     body.innerHTML = `
         <p style="color:#cbd5e1; font-size:0.86rem; margin-bottom:10px;">
-            Configura el <strong>protocolo técnico de tu traje EVA</strong> y revisa las <strong>3 salas específicas</strong> asignadas a tu especialidad.
+            Configura el <strong>protocolo técnico de tu traje EVA</strong> y revisa las <strong>5 terminales específicas</strong> asignadas a tu especialidad.
         </p>
 
         <div class="section-label">1. Protocolo de Soporte Vital del Traje EVA</div>
@@ -636,7 +630,7 @@ function renderProtocolStationUI(body) {
             }).join('')}
         </div>
 
-        <div class="section-label">3. Tus 3 Terminales Asignadas en el Complejo</div>
+        <div class="section-label">3. Tus 5 Terminales Asignadas en el Complejo</div>
         <div class="task-preview-list">
             ${currentRole.tasks.map((t, idx) => `
                 <div>
@@ -662,7 +656,7 @@ function renderProtocolStationUI(body) {
         el.onclick = () => {
             const rid = el.dataset.role;
             if (MP.takenRolesByOthers[rid]) return;
-            const role = GAME_DATA.roles.find(x => x.id === rid);
+            const role = GAME_DATA.roles.find(r => r.id === rid);
             if (role) {
                 GAME_STATE.selectedRole = role;
                 MP.syncLocalPlayerEntry();
@@ -950,6 +944,8 @@ function animateControlCenter(now) {
     const dt = Math.min(0.05, (tNow - ccLastTime) / 1000);
     ccLastTime = tNow;
     const elapsed = tNow * 0.001;
+
+    MP.tickNetworkHealth();
 
     if (windowPlanet && windowPlanet.sphere) {
         windowPlanet.sphere.rotation.y += dt * 0.08;
