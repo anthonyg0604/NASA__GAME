@@ -1,621 +1,620 @@
-let arScene, arCamera, arRenderer, arAnimId;
-let arenaStage = 'flight'; // 'flight' | 'planet' | 'return_flight'
-let shipMesh, targetPlanetObj;
+let arenaScene, arenaCamera, arenaRenderer, arenaAnimId;
+let arenaPhase = 'flight_out'; // 'flight_out' | 'base_ops' | 'flight_back'
+let arenaKeys = {};
+let arenaLastTime = 0;
+
+// Variables fase de vuelo espacial
+let flightRocket = null;
+let targetPlanetObj = null;
 let asteroids = [];
-let baseWallTasks = [];
-let baseWallColliders = [];
-let activePlanetTask = null;
-let isTaskModalOpen = false;
-let planetAstroRig, skyCompanionPlanet, reactorRing1, reactorRing2, medbayScanner;
-let planetAstroVelY = 0;
-let planetAstroGrounded = true;
-let remoteBaseAstros = {};
-let arKeys = {};
-let planetCamYaw = 0;
-let planetIsDragging = false;
-let planetPrevMouseX = 0;
-
-let shield = 100;
+let starField = null;
+let shipShield = 100;
+let maxShipShield = 100;
 let flightProgress = 0;
-let oxygen = 130;
-let maxOxygen = 130;
-let completedTasksCount = 0;
-let lastFrameTime = 0;
 
-function start3DSpaceAndPlanetGame() {
-    const container = document.getElementById('arena-webgl-container');
-    container.innerHTML = '';
-    remoteBaseAstros = {};
+// Variables fase base planetaria 68x68 (9 salas)
+let baseAstroRig = null;
+let baseAstroVelY = 0;
+let baseAstroGrounded = true;
+let remoteBaseAstros = {};
+let baseColliders = []; // { minX, maxX, minZ, maxZ }
+let roleTerminals = [];
+let activeTerminal = null;
+let isTaskModalOpen = false;
+let completedTaskIds = new Set();
+let suitOxygen = 90;
+let maxSuitOxygen = 90;
+let baseCamYaw = 0;
+let baseDragging = false;
+let basePrevMouseX = 0;
 
-    arScene = new THREE.Scene();
-    arScene.background = new THREE.Color(0x030712);
-
-    arCamera = new THREE.PerspectiveCamera(60, container.clientWidth / container.clientHeight, 0.1, 220);
-    arRenderer = new THREE.WebGLRenderer({ antialias: true });
-    arRenderer.setSize(container.clientWidth, container.clientHeight);
-    arRenderer.shadowMap.enabled = true;
-    container.appendChild(arRenderer.domElement);
-
-    const stats = GAME_STATE.getShipTotalStats();
-    shield = 100 + stats.shieldBonus;
-    maxOxygen = 130 + stats.o2Bonus;
-    oxygen = maxOxygen;
-    flightProgress = 0;
-    completedTasksCount = 0;
-    arenaStage = 'flight';
-    isTaskModalOpen = false;
-    activePlanetTask = null;
-    planetAstroVelY = 0;
-    planetAstroGrounded = true;
-    planetCamYaw = 0;
-
-    document.getElementById('arena-role-badge').innerText = `ROL: ${GAME_STATE.selectedRole.short.toUpperCase()}`;
-    document.getElementById('samples-counter').innerText = `📋 Tareas: 0 / 3`;
-    document.getElementById('arena-phase-title').innerText = `🚀 Rumbo a ${GAME_STATE.selectedMission.name}`;
-    document.getElementById('arena-hint').innerHTML = `Usa <b>W A S D</b> o <b>Flechas</b> para pilotar tu nave personalizada y esquivar meteoritos`;
-    document.getElementById('arena-interact-prompt').classList.add('hidden');
-
-    setupSpaceFlightStage(GAME_STATE.selectedMission.id);
-
-    window.addEventListener('keydown', handleArenaKeyDown);
-    window.addEventListener('keyup', handleArenaKeyUp);
-
-    container.onmousedown = e => {
-        if (e.button !== 0 || arenaStage !== 'planet') return;
-        planetIsDragging = true;
-        planetPrevMouseX = e.clientX;
-    };
-    window.addEventListener('mouseup', () => { planetIsDragging = false; });
-    window.addEventListener('mousemove', e => {
-        if (!planetIsDragging || arenaStage !== 'planet') return;
-        const deltaX = e.clientX - planetPrevMouseX;
-        planetPrevMouseX = e.clientX;
-        planetCamYaw -= deltaX * 0.006;
-    });
-
-    document.getElementById('abort-mission-btn').onclick = () => returnToHub(false);
-    document.getElementById('arena-interact-prompt').onclick = () => {
-        if (activePlanetTask && !activePlanetTask.completed) openPlanetTaskModal(activePlanetTask);
-    };
-    document.getElementById('close-task-modal-btn').onclick = closePlanetTaskModal;
-
-    lastFrameTime = performance.now();
-    animateArena();
-}
-
-function handleArenaKeyDown(e) {
-    if ((e.ctrlKey || e.metaKey) && ['s', 'p', 'u'].includes(e.key.toLowerCase())) {
-        e.preventDefault();
-        return;
-    }
-    const isArenaHidden = document.getElementById('arena-container').classList.contains('hidden');
-    if (isArenaHidden) return;
-
-    const key = e.key.toLowerCase();
-    arKeys[key] = true;
-
-    if (e.code === 'Space' && arenaStage === 'planet' && !isTaskModalOpen) {
-        e.preventDefault();
-        if (planetAstroGrounded) {
-            planetAstroVelY = 0.24;
-            planetAstroGrounded = false;
-        }
-    }
-
-    if (key === 'e' && arenaStage === 'planet' && activePlanetTask && !activePlanetTask.completed && !isTaskModalOpen) {
-        openPlanetTaskModal(activePlanetTask);
-    }
-    if (key === 'escape' && isTaskModalOpen) {
-        closePlanetTaskModal();
-    }
-}
-
-function handleArenaKeyUp(e) {
-    arKeys[e.key.toLowerCase()] = false;
-}
-
-// Configura el viaje espacial tanto de IDA al planeta como de REGRESO A LA TIERRA
-function setupSpaceFlightStage(destinationPlanetId) {
-    clearArenaScene();
-    flightProgress = 0;
-
-    arScene.background = new THREE.Color(0x030712);
-    arScene.fog = new THREE.Fog(0x030712, 35, 120);
-
-    arScene.add(new THREE.AmbientLight(0xffffff, 0.85));
-    const sun = new THREE.DirectionalLight(0xffffff, 1.25);
-    sun.position.set(12, 16, 12);
-    arScene.add(sun);
-
-    arCamera.position.set(0, 2.3, 8.2);
-    arCamera.lookAt(0, 0, -10);
-
-    shipMesh = buildCustom3DRocket(true);
-    shipMesh.rotation.x = -Math.PI / 2;
-    arScene.add(shipMesh);
-
-    targetPlanetObj = createHDPlanet(destinationPlanetId, destinationPlanetId === 'earth' ? 14.5 : 13);
-    targetPlanetObj.group.position.set(0, 3.5, -105);
-    arScene.add(targetPlanetObj.group);
-
-    const starGeo = new THREE.BufferGeometry();
-    const verts = [];
-    for (let i = 0; i < 650; i++) {
-        verts.push((Math.random() - 0.5) * 75, (Math.random() - 0.5) * 55, -Math.random() * 115);
-    }
-    starGeo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
-    arScene.add(new THREE.Points(starGeo, new THREE.PointsMaterial({ color: 0xffffff, size: 0.25 })));
-
-    asteroids = [];
-    const count = destinationPlanetId === 'earth' ? 8 : GAME_STATE.selectedMission.asteroidCount;
-    for (let i = 0; i < count; i++) {
-        const rock = new THREE.Mesh(
-            new THREE.DodecahedronGeometry(Math.random() * 0.75 + 0.65, 1),
-            new THREE.MeshStandardMaterial({ color: 0x78716c, roughness: 0.9 })
-        );
-        resetAsteroid(rock, -25 - i * 9);
-        arScene.add(rock);
-        asteroids.push(rock);
-    }
-}
-
-function resetAsteroid(rock, zPos) {
-    rock.position.set((Math.random() - 0.5) * 18, (Math.random() - 0.5) * 10, zPos);
-    rock.userData.speed = 0.44 + Math.random() * 0.24;
-}
-
-function updateSpaceFlight(dt, isReturnTrip) {
-    const stats = GAME_STATE.getShipTotalStats();
-    const speed = 0.19 * stats.speedMult;
-    if (arKeys['a'] || arKeys['arrowleft']) shipMesh.position.x -= speed;
-    if (arKeys['d'] || arKeys['arrowright']) shipMesh.position.x += speed;
-    if (arKeys['w'] || arKeys['arrowup']) shipMesh.position.y += speed;
-    if (arKeys['s'] || arKeys['arrowdown']) shipMesh.position.y -= speed;
-
-    shipMesh.position.x = Math.max(-8.5, Math.min(8.5, shipMesh.position.x));
-    shipMesh.position.y = Math.max(-4.5, Math.min(4.5, shipMesh.position.y));
-    shipMesh.rotation.z = -shipMesh.position.x * 0.08;
-
-    animateRocketExhaust(shipMesh, dt);
-
-    flightProgress += isReturnTrip ? 0.22 : 0.18;
-    targetPlanetObj.group.position.z = -105 + flightProgress * 0.82;
-    targetPlanetObj.sphere.rotation.y += 0.005;
-
-    asteroids.forEach(rock => {
-        rock.position.z += rock.userData.speed;
-        rock.rotation.x += 0.03;
-        rock.rotation.y += 0.02;
-
-        if (rock.position.z > 8) {
-            resetAsteroid(rock, -80);
-        }
-
-        if (rock.position.distanceTo(shipMesh.position) < 1.55) {
-            shield = isReturnTrip ? Math.max(15, shield - 15) : shield - 20;
-            resetAsteroid(rock, -85);
-            document.getElementById('arena-container').classList.add('shaking');
-            setTimeout(() => document.getElementById('arena-container').classList.remove('shaking'), 250);
-        }
-    });
-
-    const maxShield = 100 + stats.shieldBonus;
-    const shieldPct = Math.max(0, Math.round((shield / maxShield) * 100));
-    document.getElementById('primary-bar-label').innerText = `🛡️ Escudo Nave: ${Math.max(0, Math.round(shield))}%`;
-    document.getElementById('primary-bar-fill').style.width = `${Math.min(100, shieldPct)}%`;
-    document.getElementById('primary-bar-fill').className = 'progress-fill cyan';
-
-    const progPct = Math.min(100, Math.round(flightProgress));
-    document.getElementById('secondary-bar-label').innerText = isReturnTrip
-        ? `🌍 Regreso a la Tierra: ${progPct}%`
-        : `🪐 Progreso al Planeta: ${progPct}%`;
-    document.getElementById('secondary-bar-fill').style.width = `${progPct}%`;
-    document.getElementById('secondary-bar-fill').className = isReturnTrip ? 'progress-fill green' : 'progress-fill amber';
-
-    if (!isReturnTrip && shield <= 0) {
-        showMissionReport(false, 'Tu escudo fue destruido por los meteoritos antes de aterrizar.', 0);
-    } else if (flightProgress >= 100) {
-        if (!isReturnTrip) {
-            setupPlanetaryBaseStage();
-        } else {
-            // Aterrizaje exitoso de regreso en la Tierra
-            GAME_STATE.currentOrbitId = 'earth';
-            const earned = GAME_STATE.selectedMission.rewardCredits + Math.max(0, Math.round(shield));
-            GAME_STATE.credits += earned;
-            GAME_STATE.saveProgress();
-            updateCreditsHUD();
-            showMissionReport(
-                true,
-                `¡Aterrizaje exitoso en la Tierra, ${GAME_STATE.selectedRole.short}! Completaste las 3 operaciones en ${GAME_STATE.selectedMission.name} y trajiste la nave a salvo.`,
-                earned
-            );
-        }
-    }
-}
-
-function createWallMonitorTexture(title, subtitle, borderColor, isCompleted) {
-    const canvas = document.createElement('canvas');
-    canvas.width = 512;
-    canvas.height = 256;
-    const ctx = canvas.getContext('2d');
-
-    ctx.fillStyle = isCompleted ? '#064e3b' : '#091526';
-    ctx.fillRect(0, 0, 512, 256);
-
-    ctx.strokeStyle = isCompleted ? '#10b981' : borderColor;
-    ctx.lineWidth = 14;
-    ctx.strokeRect(10, 10, 492, 236);
-
-    ctx.fillStyle = isCompleted ? '#34d399' : borderColor;
-    ctx.font = 'bold 28px sans-serif';
-    ctx.fillText(isCompleted ? '✓ OPERACIÓN COMPLETADA' : '⚡ TERMINAL ACTIVA [E]', 32, 65);
-
-    ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 42px sans-serif';
-    ctx.fillText(title, 32, 138);
-
-    ctx.fillStyle = '#cbd5e1';
-    ctx.font = '24px sans-serif';
-    ctx.fillText(subtitle, 32, 195);
-
-    return new THREE.CanvasTexture(canvas);
-}
-
-// Textura metálica industrial con rejillas y remaches para el piso 3D de la base
-function createIndustrialFloorTexture() {
-    const canvas = document.createElement('canvas');
-    canvas.width = 512;
-    canvas.height = 512;
-    const ctx = canvas.getContext('2d');
-
-    ctx.fillStyle = '#111827';
-    ctx.fillRect(0, 0, 512, 512);
-
-    ctx.strokeStyle = '#1f2937';
-    ctx.lineWidth = 6;
-    ctx.strokeRect(4, 4, 504, 504);
-
-    ctx.fillStyle = '#374151';
-    for (let x = 32; x < 512; x += 64) {
-        for (let y = 32; y < 512; y += 64) {
-            ctx.fillRect(x, y, 24, 6);
-        }
-    }
-    const tex = new THREE.CanvasTexture(canvas);
-    tex.wrapS = THREE.RepeatWrapping;
-    tex.wrapT = THREE.RepeatWrapping;
-    tex.repeat.set(8, 8);
-    return tex;
-}
-
-// Base planetaria 3D realista estilo Among Us + iluminación dramática Gamble With Your Friends en 3.ª persona
-function setupPlanetaryBaseStage() {
-    arenaStage = 'planet';
-    clearArenaScene();
-    baseWallColliders = [];
-    baseWallTasks = [];
-    remoteBaseAstros = {};
+function startPhoraArena() {
+    const container = document.getElementById('arena-container');
+    container.classList.remove('hidden');
 
     const mission = GAME_STATE.selectedMission;
-    arScene.background = new THREE.Color(mission.skyColor);
-    arScene.fog = new THREE.FogExp2(0x070d1a, 0.022);
+    const role = GAME_STATE.selectedRole;
+    const stats = GAME_STATE.getShipTotalStats();
 
-    // Iluminación ambiental tenue para resaltar focos cálidos y luces de cada sala
-    arScene.add(new THREE.AmbientLight(0x64748b, 0.55));
+    maxShipShield = 100 + stats.shieldBonus;
+    shipShield = maxShipShield;
+    flightProgress = 0;
 
-    // Terreno exterior del planeta visible desde los ventanales
-    const outerTerrain = new THREE.Mesh(
-        new THREE.PlaneGeometry(130, 130),
-        new THREE.MeshStandardMaterial({ color: mission.groundColor, roughness: 0.9 })
-    );
-    outerTerrain.rotation.x = -Math.PI / 2;
-    outerTerrain.position.y = -0.06;
-    arScene.add(outerTerrain);
+    maxSuitOxygen = 75 + stats.o2Bonus;
+    suitOxygen = maxSuitOxygen;
+    completedTaskIds = new Set();
+    isTaskModalOpen = false;
+    activeTerminal = null;
 
-    for (let i = 0; i < 28; i++) {
-        const ang = (i / 28) * Math.PI * 2;
-        const dist = 36 + Math.random() * 10;
-        const mtn = new THREE.Mesh(
-            new THREE.ConeGeometry(5 + Math.random() * 3, 7 + Math.random() * 6, 6),
-            new THREE.MeshStandardMaterial({ color: mission.groundColor, roughness: 0.95 })
+    document.getElementById('arena-role-badge').innerText = `ROL: ${role.short.toUpperCase()}`;
+    document.getElementById('samples-counter').innerText = `📋 Tareas ${role.short}: 0 / ${role.tasks.length}`;
+
+    setupArenaEvents();
+    initFlightPhase('flight_out');
+}
+
+function setupArenaEvents() {
+    const webglHolder = document.getElementById('arena-webgl-container');
+
+    window.onkeydown = e => {
+        if (document.getElementById('arena-container').classList.contains('hidden')) return;
+        arenaKeys[e.code] = true;
+
+        if (arenaPhase === 'base_ops' && !isTaskModalOpen) {
+            if (e.code === 'Space' && baseAstroGrounded) {
+                baseAstroVelY = 0.25;
+                baseAstroGrounded = false;
+            }
+            if (e.code === 'KeyE' && activeTerminal && !completedTaskIds.has(activeTerminal.id)) {
+                openTaskMinigame(activeTerminal);
+            }
+        }
+        if (e.code === 'Escape' && isTaskModalOpen) {
+            closeTaskModal();
+        }
+    };
+
+    window.onkeyup = e => {
+        arenaKeys[e.code] = false;
+    };
+
+    webglHolder.onmousedown = e => {
+        baseDragging = true;
+        basePrevMouseX = e.clientX;
+    };
+
+    window.onmousemove = e => {
+        if (!baseDragging || isTaskModalOpen || arenaPhase !== 'base_ops') return;
+        const dx = e.clientX - basePrevMouseX;
+        basePrevMouseX = e.clientX;
+        baseCamYaw -= dx * 0.0065;
+    };
+
+    window.onmouseup = () => {
+        baseDragging = false;
+    };
+
+    document.getElementById('arena-interact-prompt').onclick = () => {
+        if (activeTerminal && !isTaskModalOpen && !completedTaskIds.has(activeTerminal.id)) {
+            openTaskMinigame(activeTerminal);
+        }
+    };
+
+    document.getElementById('close-task-modal-btn').onclick = closeTaskModal;
+
+    document.getElementById('abort-mission-btn').onclick = () => {
+        stopArenaLoop();
+        returnToControlCenter();
+    };
+}
+
+function stopArenaLoop() {
+    if (arenaAnimId) {
+        cancelAnimationFrame(arenaAnimId);
+        arenaAnimId = null;
+    }
+}
+
+function resetArenaRenderer() {
+    stopArenaLoop();
+    const holder = document.getElementById('arena-webgl-container');
+    holder.innerHTML = '';
+
+    arenaScene = new THREE.Scene();
+    arenaCamera = new THREE.PerspectiveCamera(58, holder.clientWidth / holder.clientHeight, 0.1, 160);
+    arenaRenderer = new THREE.WebGLRenderer({ antialias: true });
+    arenaRenderer.setSize(holder.clientWidth, holder.clientHeight);
+    arenaRenderer.shadowMap.enabled = true;
+    holder.appendChild(arenaRenderer.domElement);
+}
+
+// =========================================================================
+// FASE 1 Y 3: VUELO ESPACIAL (IDA AL PLANETA Y REGRESO A LA TIERRA)
+// =========================================================================
+function initFlightPhase(phaseType) {
+    arenaPhase = phaseType;
+    flightProgress = 0;
+    asteroids = [];
+    document.getElementById('arena-interact-prompt').classList.add('hidden');
+
+    resetArenaRenderer();
+    arenaScene.background = new THREE.Color(0x030712);
+    arenaScene.fog = new THREE.Fog(0x030712, 35, 130);
+
+    arenaScene.add(new THREE.AmbientLight(0xffffff, 0.85));
+    const sun = new THREE.DirectionalLight(0xe0f2fe, 1.3);
+    sun.position.set(12, 18, 15);
+    arenaScene.add(sun);
+
+    const mission = GAME_STATE.selectedMission;
+    const isReturn = phaseType === 'flight_back';
+
+    document.getElementById('arena-phase-title').innerText = isReturn
+        ? '🌍 Regreso Orbital a la Tierra'
+        : `🚀 Travesía hacia ${mission.name}`;
+
+    document.getElementById('primary-bar-label').innerText = `🛡️ Escudo Nave: ${Math.round((shipShield / maxShipShield) * 100)}%`;
+    document.getElementById('primary-bar-fill').className = 'progress-fill cyan';
+    document.getElementById('secondary-bar-label').innerText = isReturn
+        ? '🌍 Progreso a la Tierra: 0%'
+        : `🪐 Progreso a ${mission.name}: 0%`;
+    document.getElementById('secondary-bar-fill').className = 'progress-fill amber';
+    document.getElementById('secondary-bar-fill').style.width = '0%';
+    document.getElementById('arena-hint').innerHTML = 'Usa <b>W A S D</b> o <b>Flechas</b> para pilotar la nave y esquivar los meteoritos';
+
+    // Campo de estrellas
+    const starGeo = new THREE.BufferGeometry();
+    const verts = [];
+    for (let i = 0; i < 900; i++) {
+        verts.push((Math.random() - 0.5) * 90, (Math.random() - 0.5) * 65, -Math.random() * 140);
+    }
+    starGeo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+    starField = new THREE.Points(starGeo, new THREE.PointsMaterial({ color: 0xffffff, size: 0.28 }));
+    arenaScene.add(starField);
+
+    // Planeta destino lejano que se acerca
+    targetPlanetObj = createHDPlanet(isReturn ? 'earth' : mission.id, 18);
+    targetPlanetObj.group.position.set(0, 6, -125);
+    arenaScene.add(targetPlanetObj.group);
+
+    // Cohete personalizado
+    flightRocket = buildCustom3DRocket(true);
+    flightRocket.rotation.x = -Math.PI / 2;
+    flightRocket.scale.setScalar(0.75);
+    flightRocket.position.set(0, 0, 4);
+    arenaScene.add(flightRocket);
+
+    // Meteoritos
+    const rockCount = mission.asteroidCount + (isReturn ? 3 : 0);
+    const rockMat = new THREE.MeshStandardMaterial({ color: 0x64748b, roughness: 0.85, metalness: 0.15 });
+    for (let i = 0; i < rockCount; i++) {
+        const radius = 0.65 + Math.random() * 0.75;
+        const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(radius, 1), rockMat);
+        rock.position.set(
+            (Math.random() - 0.5) * 22,
+            (Math.random() - 0.5) * 13,
+            -20 - Math.random() * 110
         );
-        mtn.position.set(Math.cos(ang) * dist, 3.0, Math.sin(ang) * dist);
-        arScene.add(mtn);
+        rock.userData = {
+            radius,
+            rotSpeedX: (Math.random() - 0.5) * 2.5,
+            rotSpeedY: (Math.random() - 0.5) * 2.5
+        };
+        arenaScene.add(rock);
+        asteroids.push(rock);
     }
 
-    const skyPlanetId = mission.id === 'moon' ? 'earth' : (mission.id === 'europa' ? 'mars' : 'moon');
-    skyCompanionPlanet = createHDPlanet(skyPlanetId, 11);
-    skyCompanionPlanet.group.position.set(-20, 22, -62);
-    arScene.add(skyCompanionPlanet.group);
+    arenaCamera.position.set(0, 3.2, 12.5);
+    arenaCamera.lookAt(0, 0.5, -10);
 
-    // Nave personalizada estacionada afuera de la bahía Sur
-    const dockedRocket = buildCustom3DRocket(false);
-    dockedRocket.position.set(0, 1.85, 24);
-    arScene.add(dockedRocket);
+    arenaLastTime = performance.now();
+    animateFlightPhase();
+}
 
-    // Piso metálico industrial con relieve
-    const floorTex = createIndustrialFloorTexture();
-    const baseFloor = new THREE.Mesh(
-        new THREE.PlaneGeometry(31, 31),
-        new THREE.MeshStandardMaterial({ map: floorTex, bumpMap: floorTex, bumpScale: 0.06, roughness: 0.45, metalness: 0.35 })
-    );
-    baseFloor.rotation.x = -Math.PI / 2;
-    baseFloor.receiveShadow = true;
-    arScene.add(baseFloor);
+function animateFlightPhase(now) {
+    arenaAnimId = requestAnimationFrame(animateFlightPhase);
+    const tNow = now || performance.now();
+    const dt = Math.min(0.05, (tNow - arenaLastTime) / 1000);
+    arenaLastTime = tNow;
 
-    // Vigas industriales en el techo para sensación 3D real en tercera persona
-    const beamMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.5, metalness: 0.5 });
-    [-11, -4.5, 4.5, 11].forEach(pos => {
-        const beamX = new THREE.Mesh(new THREE.BoxGeometry(31, 0.35, 0.45), beamMat);
-        beamX.position.set(0, 4.3, pos);
-        arScene.add(beamX);
+    const stats = GAME_STATE.getShipTotalStats();
+    const moveSpeed = 13 * stats.speedMult;
 
-        const beamZ = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.35, 31), beamMat);
-        beamZ.position.set(pos, 4.3, 0);
-        arScene.add(beamZ);
-    });
+    if (flightRocket) {
+        let dx = 0;
+        let dy = 0;
+        if (arenaKeys['KeyA'] || arenaKeys['ArrowLeft']) dx -= 1;
+        if (arenaKeys['KeyD'] || arenaKeys['ArrowRight']) dx += 1;
+        if (arenaKeys['KeyW'] || arenaKeys['ArrowUp']) dy += 1;
+        if (arenaKeys['KeyS'] || arenaKeys['ArrowDown']) dy -= 1;
 
-    // 1. SALA CENTRAL DE REUNIONES (Estilo Cafetería Among Us + Mesa iluminada Gamble With Your Friends)
-    const tableSpotlight = new THREE.PointLight(0xfde68a, 1.8, 16);
-    tableSpotlight.position.set(0, 3.8, 0);
-    arScene.add(tableSpotlight);
-
-    const lampShade = new THREE.Mesh(
-        new THREE.ConeGeometry(0.65, 0.45, 20),
-        new THREE.MeshStandardMaterial({ color: 0x1e293b, emissive: 0xf59e0b, emissiveIntensity: 0.3 })
-    );
-    lampShade.position.set(0, 4.1, 0);
-    arScene.add(lampShade);
-
-    const meetingTable = new THREE.Mesh(
-        new THREE.CylinderGeometry(2.15, 1.95, 0.92, 32),
-        new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.3, metalness: 0.4 })
-    );
-    meetingTable.position.y = 0.46;
-    arScene.add(meetingTable);
-
-    const tableTopHolo = new THREE.Mesh(
-        new THREE.CylinderGeometry(1.75, 1.75, 0.05, 32),
-        new THREE.MeshStandardMaterial({ color: 0x10b981, emissive: 0x059669, emissiveIntensity: 0.65 })
-    );
-    tableTopHolo.position.y = 0.94;
-    arScene.add(tableTopHolo);
-
-    // Aro verde exterior alrededor de la mesa central (zona de recarga de O2 y despegue de regreso)
-    const lifeSupportPad = new THREE.Mesh(
-        new THREE.RingGeometry(3.0, 3.55, 48),
-        new THREE.MeshBasicMaterial({ color: 0x10b981, side: THREE.DoubleSide })
-    );
-    lifeSupportPad.rotation.x = -Math.PI / 2;
-    lifeSupportPad.position.y = 0.03;
-    arScene.add(lifeSupportPad);
-
-    // 4 asientos alrededor de la mesa central
-    for (let i = 0; i < 4; i++) {
-        const ang = (i * Math.PI) / 2 + Math.PI / 4;
-        const stool = new THREE.Mesh(
-            new THREE.CylinderGeometry(0.38, 0.32, 0.55, 16),
-            new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.4 })
-        );
-        stool.position.set(Math.cos(ang) * 2.55, 0.28, Math.sin(ang) * 2.55);
-        arScene.add(stool);
+        flightRocket.position.x = Math.max(-10.5, Math.min(10.5, flightRocket.position.x + dx * moveSpeed * dt));
+        flightRocket.position.y = Math.max(-6.2, Math.min(6.2, flightRocket.position.y + dy * moveSpeed * dt));
+        flightRocket.rotation.z = -dx * 0.35;
+        animateRocketExhaust(flightRocket, dt);
     }
 
-    baseWallColliders.push({ minX: -2.2, maxX: 2.2, minZ: -2.2, maxZ: 2.2 });
+    // Avance de viaje
+    flightProgress += dt * 7.8 * stats.speedMult;
+    const pct = Math.min(100, Math.round(flightProgress));
+    const isReturn = arenaPhase === 'flight_back';
 
-    // 2. ALA OESTE: SALA DEL REACTOR (Núcleo giratorio estilo Reactor Among Us)
-    const reactorLight = new THREE.PointLight(0x38bdf8, 1.7, 14);
-    reactorLight.position.set(-10.5, 2.8, 0);
-    arScene.add(reactorLight);
+    document.getElementById('secondary-bar-label').innerText = isReturn
+        ? `🌍 Progreso a la Tierra: ${pct}%`
+        : `🪐 Progreso a ${GAME_STATE.selectedMission.name}: ${pct}%`;
+    document.getElementById('secondary-bar-fill').style.width = `${pct}%`;
 
-    const reactorCore = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.9, 0.9, 3.8, 24),
-        new THREE.MeshStandardMaterial({ color: 0x38bdf8, emissive: 0x0284c7, emissiveIntensity: 0.85 })
-    );
-    reactorCore.position.set(-10.8, 1.9, 0);
-    arScene.add(reactorCore);
+    if (targetPlanetObj) {
+        targetPlanetObj.group.position.z = -125 + (pct / 100) * 92;
+        targetPlanetObj.sphere.rotation.y += dt * 0.25;
+    }
 
-    reactorRing1 = new THREE.Mesh(new THREE.TorusGeometry(1.45, 0.1, 12, 32), new THREE.MeshBasicMaterial({ color: 0xf59e0b }));
-    reactorRing1.position.set(-10.8, 1.9, 0);
-    arScene.add(reactorRing1);
+    // Mover estrellas y meteoritos
+    const posArr = starField.geometry.attributes.position.array;
+    for (let i = 2; i < posArr.length; i += 3) {
+        posArr[i] += 48 * dt * stats.speedMult;
+        if (posArr[i] > 12) posArr[i] = -130;
+    }
+    starField.geometry.attributes.position.needsUpdate = true;
 
-    reactorRing2 = new THREE.Mesh(new THREE.TorusGeometry(1.7, 0.08, 12, 32), new THREE.MeshBasicMaterial({ color: 0x38bdf8 }));
-    reactorRing2.position.set(-10.8, 1.9, 0);
-    reactorRing2.rotation.x = Math.PI / 2;
-    arScene.add(reactorRing2);
+    const rockSpeed = 28 * stats.speedMult;
+    asteroids.forEach(rock => {
+        rock.position.z += rockSpeed * dt;
+        rock.rotation.x += rock.userData.rotSpeedX * dt;
+        rock.rotation.y += rock.userData.rotSpeedY * dt;
 
-    baseWallColliders.push({ minX: -12.1, maxX: -9.5, minZ: -1.3, maxZ: 1.3 });
+        if (flightRocket) {
+            const dist = rock.position.distanceTo(flightRocket.position);
+            if (dist < rock.userData.radius + 0.95) {
+                shipShield = Math.max(0, shipShield - 18);
+                const shieldPct = Math.round((shipShield / maxShipShield) * 100);
+                document.getElementById('primary-bar-label').innerText = `🛡️ Escudo Nave: ${shieldPct}%`;
+                document.getElementById('primary-bar-fill').style.width = `${shieldPct}%`;
+                rock.position.z = -110 - Math.random() * 35;
+                rock.position.x = (Math.random() - 0.5) * 21;
+                rock.position.y = (Math.random() - 0.5) * 12;
 
-    // 3. ALA ESTE: LABORATORIO MEDBAY (Escáner y cilindros de muestras brillantes)
-    const labLight = new THREE.PointLight(0x10b981, 1.6, 14);
-    labLight.position.set(10.5, 2.8, 0);
-    arScene.add(labLight);
+                if (shipShield <= 0) {
+                    stopArenaLoop();
+                    showMissionReport(false, 'El escudo de la nave llegó al 0% por impacto de meteoritos. Mejora tu blindaje en el Taller de Nave.');
+                    return;
+                }
+            }
+        }
 
-    medbayScanner = new THREE.Mesh(
-        new THREE.CylinderGeometry(1.3, 1.4, 0.18, 24),
-        new THREE.MeshStandardMaterial({ color: 0x10b981, emissive: 0x059669, emissiveIntensity: 0.7 })
-    );
-    medbayScanner.position.set(10.5, 0.09, 0);
-    arScene.add(medbayScanner);
-
-    [-4.2, 4.2].forEach(zTube => {
-        const tube = new THREE.Mesh(
-            new THREE.CylinderGeometry(0.55, 0.55, 2.8, 20),
-            new THREE.MeshStandardMaterial({ color: 0x34d399, emissive: 0x059669, emissiveIntensity: 0.45, transparent: true, opacity: 0.65 })
-        );
-        tube.position.set(11.5, 1.4, zTube);
-        arScene.add(tube);
-        baseWallColliders.push({ minX: 10.7, maxX: 12.3, minZ: zTube - 0.8, maxZ: zTube + 0.8 });
-    });
-
-    // 4. ALA SUR: COMUNICACIONES Y CAJAS DE CARGA
-    const commsLight = new THREE.PointLight(0xa855f7, 1.5, 14);
-    commsLight.position.set(0, 2.8, 10.5);
-    arScene.add(commsLight);
-
-    [[-5.2, 11.2], [5.2, 11.2]].forEach(([cx, cz]) => {
-        const crate = new THREE.Mesh(
-            new THREE.BoxGeometry(1.3, 1.3, 1.3),
-            new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.5, metalness: 0.4 })
-        );
-        crate.position.set(cx, 0.65, cz);
-        arScene.add(crate);
-        baseWallColliders.push({ minX: cx - 0.9, maxX: cx + 0.9, minZ: cz - 0.9, maxZ: cz + 0.9 });
-    });
-
-    // Paredes exteriores con ventanales panorámicos reforzados
-    const wallMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.45, metalness: 0.3 });
-    const glassMat = new THREE.MeshStandardMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.24, roughness: 0.08 });
-
-    const wallSegments = [
-        { x: 0, z: -15.4, w: 13, d: 0.7, h: 4.2, glass: false },
-        { x: 0, z: 15.4, w: 13, d: 0.7, h: 4.2, glass: false },
-        { x: -15.4, z: 0, w: 0.7, d: 13, h: 4.2, glass: false },
-        { x: 15.4, z: 0, w: 0.7, d: 13, h: 4.2, glass: false },
-        { x: -10.8, z: -15.4, w: 8.6, d: 0.4, h: 3.8, glass: true },
-        { x: 10.8, z: -15.4, w: 8.6, d: 0.4, h: 3.8, glass: true },
-        { x: -10.8, z: 15.4, w: 8.6, d: 0.4, h: 3.8, glass: true },
-        { x: 10.8, z: 15.4, w: 8.6, d: 0.4, h: 3.8, glass: true },
-        { x: -15.4, z: -10.8, w: 0.4, d: 8.6, h: 3.8, glass: true },
-        { x: -15.4, z: 10.8, w: 0.4, d: 8.6, h: 3.8, glass: true },
-        { x: 15.4, z: -10.8, w: 0.4, d: 8.6, h: 3.8, glass: true },
-        { x: 15.4, z: 10.8, w: 0.4, d: 8.6, h: 3.8, glass: true }
-    ];
-
-    wallSegments.forEach(ws => {
-        const mesh = new THREE.Mesh(new THREE.BoxGeometry(ws.w, ws.h, ws.d), ws.glass ? glassMat : wallMat);
-        mesh.position.set(ws.x, ws.h / 2, ws.z);
-        arScene.add(mesh);
-
-        if (!ws.glass) {
-            const neonTop = new THREE.Mesh(
-                new THREE.BoxGeometry(ws.w + 0.1, 0.14, ws.d + 0.1),
-                new THREE.MeshBasicMaterial({ color: 0x38bdf8 })
-            );
-            neonTop.position.set(ws.x, ws.h, ws.z);
-            arScene.add(neonTop);
+        if (rock.position.z > 14) {
+            rock.position.z = -105 - Math.random() * 35;
+            rock.position.x = (Math.random() - 0.5) * 21;
+            rock.position.y = (Math.random() - 0.5) * 12;
         }
     });
 
-    // Mamparos interiores con puertas estilo nave espacial Among Us
-    const interiorDividers = [
-        { x: -5.2, z: -6.4, w: 4.2, d: 0.55 },
-        { x: 5.2, z: -6.4, w: 4.2, d: 0.55 },
-        { x: -5.2, z: 6.4, w: 4.2, d: 0.55 },
-        { x: 5.2, z: 6.4, w: 4.2, d: 0.55 },
-        { x: -6.4, z: -4.8, w: 0.55, d: 3.4 },
-        { x: -6.4, z: 4.8, w: 0.55, d: 3.4 },
-        { x: 6.4, z: -4.8, w: 0.55, d: 3.4 },
-        { x: 6.4, z: 4.8, w: 0.55, d: 3.4 }
-    ];
+    if (pct >= 100) {
+        stopArenaLoop();
+        if (arenaPhase === 'flight_out') {
+            initPlanetaryBasePhase();
+        } else {
+            const reward = GAME_STATE.selectedMission.rewardCredits;
+            GAME_STATE.credits += reward;
+            GAME_STATE.saveProgress();
+            showMissionReport(true, `¡Aterrizaje exitoso en la Tierra! Todas las tareas de ${GAME_STATE.selectedRole.short} fueron completadas en ${GAME_STATE.selectedMission.name}. Recompensa: +${reward} CR.`);
+        }
+        return;
+    }
 
-    interiorDividers.forEach(div => {
-        const wall = new THREE.Mesh(new THREE.BoxGeometry(div.w, 3.6, div.d), wallMat);
-        wall.position.set(div.x, 1.8, div.z);
-        arScene.add(wall);
-
-        const trim = new THREE.Mesh(
-            new THREE.BoxGeometry(div.w + 0.08, 0.12, div.d + 0.08),
-            new THREE.MeshBasicMaterial({ color: 0x0ea5e9 })
-        );
-        trim.position.set(div.x, 3.62, div.z);
-        arScene.add(trim);
-
-        baseWallColliders.push({
-            minX: div.x - div.w / 2 - 0.55,
-            maxX: div.x + div.w / 2 + 0.55,
-            minZ: div.z - div.d / 2 - 0.55,
-            maxZ: div.z + div.d / 2 + 0.55
-        });
-    });
-
-    // Terminales 3D de misión en las paredes de cada sector
-    GAME_DATA.roles.forEach(role => {
-        const isMyRole = role.id === GAME_STATE.selectedRole.id;
-
-        role.tasks.forEach(taskSpec => {
-            const panelGroup = new THREE.Group();
-            panelGroup.position.set(taskSpec.x, 1.9, taskSpec.z);
-            panelGroup.rotation.y = taskSpec.rotY;
-
-            const consoleBase = new THREE.Mesh(
-                new THREE.BoxGeometry(2.6, 1.1, 0.65),
-                new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.4 })
-            );
-            consoleBase.position.set(0, -1.35, 0.25);
-            panelGroup.add(consoleBase);
-
-            const screenTex = isMyRole
-                ? createWallMonitorTexture(taskSpec.wallLabel, 'Presiona [E] para operar', role.colorCss, false)
-                : createWallMonitorTexture(taskSpec.wallLabel, `Sector: ${role.short}`, '#475569', false);
-
-            const screenMesh = new THREE.Mesh(
-                new THREE.BoxGeometry(2.4, 1.25, 0.16),
-                new THREE.MeshBasicMaterial({ map: screenTex })
-            );
-            panelGroup.add(screenMesh);
-
-            const barMat = new THREE.MeshBasicMaterial({ color: isMyRole ? role.colorHex : 0x334155 });
-            const leftTube = new THREE.Mesh(new THREE.BoxGeometry(0.14, 3.2, 0.2), barMat);
-            leftTube.position.set(-1.38, -0.1, 0.05);
-            panelGroup.add(leftTube);
-
-            const rightTube = new THREE.Mesh(new THREE.BoxGeometry(0.14, 3.2, 0.2), barMat);
-            rightTube.position.set(1.38, -0.1, 0.05);
-            panelGroup.add(rightTube);
-
-            arScene.add(panelGroup);
-
-            if (isMyRole) {
-                const forward = new THREE.Vector3(0, 0, 1.75).applyAxisAngle(new THREE.Vector3(0, 1, 0), taskSpec.rotY);
-                const floorSpot = new THREE.Vector3(taskSpec.x, 0.03, taskSpec.z).add(forward);
-
-                const ring = new THREE.Mesh(
-                    new THREE.RingGeometry(0.8, 1.08, 32),
-                    new THREE.MeshBasicMaterial({ color: role.colorHex, side: THREE.DoubleSide })
-                );
-                ring.rotation.x = -Math.PI / 2;
-                ring.position.copy(floorSpot);
-                arScene.add(ring);
-
-                const wallGlow = new THREE.PointLight(role.colorHex, 1.5, 8);
-                wallGlow.position.set(floorSpot.x, 2.3, floorSpot.z);
-                arScene.add(wallGlow);
-
-                baseWallTasks.push({
-                    ...taskSpec,
-                    roleColor: role.colorCss,
-                    completed: false,
-                    interactPos: floorSpot,
-                    screenMesh,
-                    leftTube,
-                    rightTube,
-                    ringMesh: ring,
-                    light: wallGlow
-                });
-            }
-        });
-    });
-
-    const myRole = GAME_STATE.selectedRole;
-    const myChar = GAME_DATA.characters.find(c => c.id === GAME_STATE.selectedCharacterId) || GAME_DATA.characters[0];
-    planetAstroRig = createBackyardiganCharacter(myChar.id, {
-        name: MP.myName,
-        charName: myChar.shortName,
-        roleShort: myRole.short,
-        colorCss: myRole.colorCss
-    });
-    planetAstroRig.group.position.set(0, 0, 4.2);
-    arScene.add(planetAstroRig.group);
-
-    document.getElementById('arena-phase-title').innerText = `🏢 Base en ${mission.name}`;
-    document.getElementById('arena-hint').innerHTML = `Completa las 3 terminales <b style="color:${myRole.colorCss};">${myRole.short}</b> • <b>[E]</b> Operar • <b>[Espacio]</b> Saltar • <b>Clic+Arrastrar</b> Cámara`;
-    document.getElementById('primary-bar-fill').className = 'progress-fill green';
-    document.getElementById('secondary-bar-fill').className = 'progress-fill cyan';
+    arenaRenderer.render(arenaScene, arenaCamera);
 }
 
-function syncRemoteBaseAstronauts(time, dt) {
-    MP.updateBots(dt, 7.5);
+// =========================================================================
+// FASE 2: BASE PLANETARIA CERRADA 68x68 (9 SALAS, TECHO ALTO 11m, SIN TRANSPARENCIAS)
+// =========================================================================
+function initPlanetaryBasePhase() {
+    arenaPhase = 'base_ops';
+    baseColliders = [];
+    roleTerminals = [];
+    remoteBaseAstros = {};
+    baseCamYaw = 0;
+
+    resetArenaRenderer();
+
+    const mission = GAME_STATE.selectedMission;
+    const role = GAME_STATE.selectedRole;
+
+    arenaScene.background = new THREE.Color(mission.skyColor);
+    arenaScene.fog = new THREE.Fog(0x070d1a, 32, 85);
+
+    document.getElementById('arena-phase-title').innerText = `🏛️ Base en ${mission.name}`;
+    document.getElementById('primary-bar-label').innerText = `🫁 Oxígeno Traje: 100%`;
+    document.getElementById('primary-bar-fill').className = 'progress-fill green';
+    document.getElementById('primary-bar-fill').style.width = '100%';
+
+    document.getElementById('secondary-bar-label').innerText = `📋 Tareas de ${role.short}: 0/${role.tasks.length}`;
+    document.getElementById('secondary-bar-fill').className = 'progress-fill cyan';
+    document.getElementById('secondary-bar-fill').style.width = '0%';
+
+    // Iluminación interior amplia para las 9 salas
+    arenaScene.add(new THREE.AmbientLight(0xcbd5e1, 0.85));
+
+    const roomCoords = [-22.5, 0, 22.5];
+    roomCoords.forEach(rx => {
+        roomCoords.forEach(rz => {
+            const pLight = new THREE.PointLight(mission.accentColor, 0.9, 28);
+            pLight.position.set(rx, 8.8, rz);
+            arenaScene.add(pLight);
+
+            // Luminaria en el techo alto (y = 10.7)
+            const lamp = new THREE.Mesh(
+                new THREE.BoxGeometry(3.6, 0.25, 3.6),
+                new THREE.MeshBasicMaterial({ color: 0xe0f2fe })
+            );
+            lamp.position.set(rx, 10.8, rz);
+            arenaScene.add(lamp);
+        });
+    });
+
+    buildClosed9RoomComplex(mission);
+    buildRoleSpecificTerminals(role);
+
+    // Astronauta del jugador en el centro de la sala central (0, 0, 0)
+    const char = GAME_DATA.characters.find(c => c.id === GAME_STATE.selectedCharacterId) || GAME_DATA.characters[0];
+    baseAstroRig = createBackyardiganCharacter(char.id, {
+        name: MP.myName,
+        charName: char.shortName,
+        roleShort: role.short,
+        colorCss: role.colorCss
+    });
+    baseAstroRig.group.position.set(0, 0, 0);
+    arenaScene.add(baseAstroRig.group);
+
+    updateBaseCompassHint();
+
+    arenaLastTime = performance.now();
+    animatePlanetaryBase();
+}
+
+function addSolidWallBox(cx, cz, widthX, depthZ, heightY, wallMat, trimMat) {
+    const wall = new THREE.Mesh(
+        new THREE.BoxGeometry(widthX, heightY, depthZ),
+        wallMat
+    );
+    wall.position.set(cx, heightY / 2, cz);
+    wall.castShadow = true;
+    wall.receiveShadow = true;
+    arenaScene.add(wall);
+
+    // Franja neón inferior para visibilidad espacial
+    if (trimMat) {
+        const trim = new THREE.Mesh(
+            new THREE.BoxGeometry(widthX + 0.06, 0.25, depthZ + 0.06),
+            trimMat
+        );
+        trim.position.set(cx, 0.35, cz);
+        arenaScene.add(trim);
+    }
+
+    baseColliders.push({
+        minX: cx - widthX / 2 - 0.55,
+        maxX: cx + widthX / 2 + 0.55,
+        minZ: cz - depthZ / 2 - 0.55,
+        maxZ: cz + depthZ / 2 + 0.55
+    });
+}
+
+function buildClosed9RoomComplex(mission) {
+    const WALL_H = 11.0; // Techo alto de 11 metros
+    const WALL_T = 1.4;  // Paredes gruesas 100% opacas
+
+    // Suelo principal 68 x 68 (de -34 a +34)
+    const floor = new THREE.Mesh(
+        new THREE.PlaneGeometry(68, 68),
+        new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.45, metalness: 0.25 })
+    );
+    floor.rotation.x = -Math.PI / 2;
+    floor.receiveShadow = true;
+    arenaScene.add(floor);
+
+    const grid = new THREE.GridHelper(68, 34, mission.accentColor, 0x1e293b);
+    grid.position.y = 0.01;
+    arenaScene.add(grid);
+
+    // Techo sólido cerrado a y = 11.0 (nadie puede ver hacia afuera ni atravesar paredes)
+    const ceiling = new THREE.Mesh(
+        new THREE.BoxGeometry(70, 0.8, 70),
+        new THREE.MeshStandardMaterial({ color: 0x091122, roughness: 0.7, side: THREE.DoubleSide })
+    );
+    ceiling.position.set(0, WALL_H + 0.4, 0);
+    arenaScene.add(ceiling);
+
+    const outerWallMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.55, metalness: 0.2 });
+    const innerWallMat = new THREE.MeshStandardMaterial({ color: 0x263349, roughness: 0.5, metalness: 0.2 });
+    const trimMat = new THREE.MeshBasicMaterial({ color: mission.accentColor });
+
+    // 4 Paredes Exteriores Sólidas (Norte z=-34, Sur z=34, Oeste x=-34, Este x=34)
+    addSolidWallBox(0, -34.2, 69.8, WALL_T, WALL_H, outerWallMat, trimMat);
+    addSolidWallBox(0, 34.2, 69.8, WALL_T, WALL_H, outerWallMat, trimMat);
+    addSolidWallBox(-34.2, 0, WALL_T, 69.8, WALL_H, outerWallMat, trimMat);
+    addSolidWallBox(34.2, 0, WALL_T, 69.8, WALL_H, outerWallMat, trimMat);
+
+    // Divisiones Interiores en cuadrícula 3x3 (en x = -11, x = +11 y z = -11, z = +11)
+    // Con puertas amplias de 5.2m centradas en -22.5, 0 y +22.5
+    const doorCenters = [-22.5, 0, 22.5];
+    const doorHalf = 2.6;
+
+    function buildWallWithDoorways(isVerticalWall, fixedCoord) {
+        let cursor = -33.5;
+        doorCenters.forEach(dc => {
+            const segEnd = dc - doorHalf;
+            const segLen = segEnd - cursor;
+            if (segLen > 0.4) {
+                const segCenter = (cursor + segEnd) / 2;
+                if (isVerticalWall) {
+                    addSolidWallBox(fixedCoord, segCenter, 1.1, segLen, WALL_H, innerWallMat, trimMat);
+                } else {
+                    addSolidWallBox(segCenter, fixedCoord, segLen, 1.1, WALL_H, innerWallMat, trimMat);
+                }
+            }
+            // Dintel superior sobre la puerta (de y=4.6 a y=11.0)
+            const lintel = new THREE.Mesh(
+                isVerticalWall
+                    ? new THREE.BoxGeometry(1.1, WALL_H - 4.6, doorHalf * 2)
+                    : new THREE.BoxGeometry(doorHalf * 2, WALL_H - 4.6, 1.1),
+                innerWallMat
+            );
+            lintel.position.set(
+                isVerticalWall ? fixedCoord : dc,
+                4.6 + (WALL_H - 4.6) / 2,
+                isVerticalWall ? dc : fixedCoord
+            );
+            arenaScene.add(lintel);
+
+            cursor = dc + doorHalf;
+        });
+
+        const lastLen = 33.5 - cursor;
+        if (lastLen > 0.4) {
+            const lastCenter = (cursor + 33.5) / 2;
+            if (isVerticalWall) {
+                addSolidWallBox(fixedCoord, lastCenter, 1.1, lastLen, WALL_H, innerWallMat, trimMat);
+            } else {
+                addSolidWallBox(lastCenter, fixedCoord, lastLen, 1.1, WALL_H, innerWallMat, trimMat);
+            }
+        }
+    }
+
+    buildWallWithDoorways(true, -11);
+    buildWallWithDoorways(true, 11);
+    buildWallWithDoorways(false, -11);
+    buildWallWithDoorways(false, 11);
+
+    // Letreros identificadores de las 9 salas del complejo
+    const roomSigns = [
+        { text: 'CAFETERÍA CENTRAL', x: 0, z: 0 },
+        { text: 'PUENTE DE NAVEGACIÓN (NORTE)', x: 0, z: -22.5 },
+        { text: 'ARMERÍA Y ESCUDOS (NOROESTE)', x: -22.5, z: -22.5 },
+        { text: 'SOPORTE VITAL O2 (NORESTE)', x: 22.5, z: -22.5 },
+        { text: 'SALA DEL REACTOR (OESTE)', x: -22.5, z: 0 },
+        { text: 'LABORATORIO MEDBAY (ESTE)', x: 22.5, z: 0 },
+        { text: 'SALA ELÉCTRICA (SUROESTE)', x: -22.5, z: 22.5 },
+        { text: 'COMUNICACIONES (SUR)', x: 0, z: 22.5 },
+        { text: 'BAHÍA DE CARGA / MOTORES (SURESTE)', x: 22.5, z: 22.5 }
+    ];
+
+    roomSigns.forEach(rs => {
+        const sprite = createConsoleLabelSprite(rs.text, '#38bdf8');
+        sprite.scale.set(5.4, 1.15, 1);
+        sprite.position.set(rs.x, 7.6, rs.z);
+        arenaScene.add(sprite);
+    });
+}
+
+function buildRoleSpecificTerminals(role) {
+    roleTerminals = [];
+
+    role.tasks.forEach(task => {
+        const group = new THREE.Group();
+        group.position.set(task.x, 0, task.z);
+        group.rotation.y = task.rotY || 0;
+
+        const pedestal = new THREE.Mesh(
+            new THREE.BoxGeometry(1.7, 1.35, 0.85),
+            new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.4, metalness: 0.5 })
+        );
+        pedestal.position.y = 0.675;
+        group.add(pedestal);
+
+        const screenMat = new THREE.MeshStandardMaterial({
+            color: role.colorHex,
+            emissive: role.colorHex,
+            emissiveIntensity: 0.85
+        });
+        const screen = new THREE.Mesh(new THREE.BoxGeometry(1.45, 0.95, 0.14), screenMat);
+        screen.position.set(0, 1.75, 0.12);
+        screen.rotation.x = -0.25;
+        group.add(screen);
+
+        // Baliza vertical luminosa para localizar el objetivo en la sala
+        const beacon = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.18, 0.45, 9.5, 16, 1, true),
+            new THREE.MeshBasicMaterial({
+                color: role.colorHex,
+                transparent: true,
+                opacity: 0.22,
+                side: THREE.DoubleSide
+            })
+        );
+        beacon.position.set(0, 5.0, 0.6);
+        group.add(beacon);
+
+        const label = createConsoleLabelSprite(task.wallLabel, role.colorCss);
+        label.position.set(0, 2.85, 0.2);
+        group.add(label);
+
+        arenaScene.add(group);
+        roleTerminals.push({ ...task, group, screenMat, beacon });
+    });
+}
+
+function updateBaseCompassHint() {
+    const pending = roleTerminals.filter(t => !completedTaskIds.has(t.id));
+    const hintEl = document.getElementById('arena-hint');
+    if (!hintEl) return;
+
+    if (pending.length === 0) {
+        hintEl.innerHTML = '✅ <b>¡Todas tus tareas completadas!</b> Preparando regreso orbital...';
+        return;
+    }
+
+    const nextTask = pending[0];
+    hintEl.innerHTML = `🎯 Objetivo pendiente (${pending.length}): <b>${nextTask.title}</b> en <b>${nextTask.roomName}</b> • <b>[E]</b> Operar`;
+}
+
+function resolveBaseWallCollisions(pos) {
+    const r = 0.48;
+    for (let i = 0; i < baseColliders.length; i++) {
+        const box = baseColliders[i];
+        if (pos.x + r > box.minX && pos.x - r < box.maxX && pos.z + r > box.minZ && pos.z - r < box.maxZ) {
+            const overlapLeft = (pos.x + r) - box.minX;
+            const overlapRight = box.maxX - (pos.x - r);
+            const overlapTop = (pos.z + r) - box.minZ;
+            const overlapBottom = box.maxZ - (pos.z - r);
+            const minOverlap = Math.min(overlapLeft, overlapRight, overlapTop, overlapBottom);
+
+            if (minOverlap === overlapLeft) pos.x = box.minX - r;
+            else if (minOverlap === overlapRight) pos.x = box.maxX + r;
+            else if (minOverlap === overlapTop) pos.z = box.minZ - r;
+            else if (minOverlap === overlapBottom) pos.z = box.maxZ + r;
+        }
+    }
+    pos.x = Math.max(-32.8, Math.min(32.8, pos.x));
+    pos.z = Math.max(-32.8, Math.min(32.8, pos.z));
+}
+
+function clampBaseCameraInsideWalls(camPos, targetPos) {
+    // Mantener la cámara siempre debajo del techo (y = 11) y dentro de las paredes exteriores
+    camPos.y = Math.min(9.2, Math.max(1.8, camPos.y));
+    camPos.x = Math.max(-32.6, Math.min(32.6, camPos.x));
+    camPos.z = Math.max(-32.6, Math.min(32.6, camPos.z));
+
+    // Evitar que la cámara cruce muros interiores entre el personaje y la lente
+    const steps = 8;
+    for (let s = 1; s <= steps; s++) {
+        const t = s / steps;
+        const testX = targetPos.x + (camPos.x - targetPos.x) * t;
+        const testZ = targetPos.z + (camPos.z - targetPos.z) * t;
+        for (let i = 0; i < baseColliders.length; i++) {
+            const b = baseColliders[i];
+            if (testX > b.minX + 0.25 && testX < b.maxX - 0.25 && testZ > b.minZ + 0.25 && testZ < b.maxZ - 0.25) {
+                const safeT = Math.max(0.18, (s - 1) / steps);
+                camPos.x = targetPos.x + (camPos.x - targetPos.x) * safeT;
+                camPos.z = targetPos.z + (camPos.z - targetPos.z) * safeT;
+                return;
+            }
+        }
+    }
+}
+
+function syncBaseRemoteAstronauts(elapsed, dt) {
+    MP.updateBots(dt, 28);
 
     const activeIds = new Set();
     Object.values(MP.players).forEach(p => {
@@ -624,9 +623,7 @@ function syncRemoteBaseAstronauts(time, dt) {
 
         const charId = p.characterId || 'pablo';
         if (!remoteBaseAstros[p.id] || remoteBaseAstros[p.id].charId !== charId || remoteBaseAstros[p.id].name !== p.name) {
-            if (remoteBaseAstros[p.id]) {
-                arScene.remove(remoteBaseAstros[p.id].rig.group);
-            }
+            if (remoteBaseAstros[p.id]) arenaScene.remove(remoteBaseAstros[p.id].rig.group);
             const role = GAME_DATA.roles.find(r => r.id === p.roleId) || GAME_DATA.roles[0];
             const char = GAME_DATA.characters.find(c => c.id === charId) || GAME_DATA.characters[0];
             const rig = createBackyardiganCharacter(charId, {
@@ -635,8 +632,8 @@ function syncRemoteBaseAstronauts(time, dt) {
                 roleShort: role.short,
                 colorCss: role.colorCss
             });
-            rig.group.position.set(p.x || 0, p.y || 0, p.z || 4.0);
-            arScene.add(rig.group);
+            rig.group.position.set(p.x || 0, p.y || 0, p.z || 0);
+            arenaScene.add(rig.group);
             remoteBaseAstros[p.id] = { rig, charId, name: p.name };
         }
 
@@ -644,16 +641,12 @@ function syncRemoteBaseAstronauts(time, dt) {
         rig.group.position.x += (p.x - rig.group.position.x) * 0.2;
         rig.group.position.y += ((p.y || 0) - rig.group.position.y) * 0.25;
         rig.group.position.z += (p.z - rig.group.position.z) * 0.2;
-        resolveBaseWallCollisions(rig.group.position);
         rig.group.rotation.y = p.rotY || 0;
 
         if (rig.propellerMesh) rig.propellerMesh.rotation.y += 0.25;
 
-        if ((p.y || 0) > 0.1) {
-            rig.leftArm.rotation.x = -0.6;
-            rig.rightArm.rotation.x = -0.6;
-        } else if (p.moving) {
-            const swing = Math.sin(time * 11) * 0.5;
+        if (p.moving) {
+            const swing = Math.sin(elapsed * 11) * 0.5;
             rig.leftLeg.rotation.x = swing;
             rig.rightLeg.rotation.x = -swing;
             rig.leftArm.rotation.x = -swing;
@@ -668,442 +661,407 @@ function syncRemoteBaseAstronauts(time, dt) {
 
     Object.keys(remoteBaseAstros).forEach(id => {
         if (!activeIds.has(id)) {
-            arScene.remove(remoteBaseAstros[id].rig.group);
+            arenaScene.remove(remoteBaseAstros[id].rig.group);
             delete remoteBaseAstros[id];
         }
     });
 }
 
-function resolveBaseWallCollisions(pos) {
-    pos.x = Math.max(-14.0, Math.min(14.0, pos.x));
-    pos.z = Math.max(-14.0, Math.min(14.0, pos.z));
+function animatePlanetaryBase(now) {
+    arenaAnimId = requestAnimationFrame(animatePlanetaryBase);
+    const tNow = now || performance.now();
+    const dt = Math.min(0.05, (tNow - arenaLastTime) / 1000);
+    arenaLastTime = tNow;
+    const elapsed = tNow * 0.001;
 
-    baseWallColliders.forEach(box => {
-        if (pos.x > box.minX && pos.x < box.maxX && pos.z > box.minZ && pos.z < box.maxZ) {
-            const penLeft = Math.abs(pos.x - box.minX);
-            const penRight = Math.abs(box.maxX - pos.x);
-            const penTop = Math.abs(pos.z - box.minZ);
-            const penBottom = Math.abs(box.maxZ - pos.z);
-            const minPen = Math.min(penLeft, penRight, penTop, penBottom);
-
-            if (minPen === penLeft) pos.x = box.minX;
-            else if (minPen === penRight) pos.x = box.maxX;
-            else if (minPen === penTop) pos.z = box.minZ;
-            else pos.z = box.maxZ;
-        }
-    });
-}
-
-function updatePlanetExploration(time, dt) {
-    if (skyCompanionPlanet && skyCompanionPlanet.sphere) {
-        skyCompanionPlanet.sphere.rotation.y += 0.002;
-    }
-    if (reactorRing1) {
-        reactorRing1.rotation.x += dt * 1.4;
-        reactorRing1.rotation.y += dt * 1.1;
-    }
-    if (reactorRing2) {
-        reactorRing2.rotation.y -= dt * 1.6;
-    }
-    if (medbayScanner) {
-        medbayScanner.scale.setScalar(1 + Math.sin(time * 4) * 0.06);
-    }
-
-    syncRemoteBaseAstronauts(time, dt);
-    const astro = planetAstroRig.group;
-
-    if (planetAstroRig.propellerMesh) {
-        planetAstroRig.propellerMesh.rotation.y += 0.25;
-    }
-
+    // Consumo de oxígeno del traje
     if (!isTaskModalOpen) {
-        const isRunning = arKeys['shift'];
-        const moveSpeed = isRunning ? 0.18 : 0.12;
-        let forwardInput = 0, strafeInput = 0;
-        if (arKeys['w'] || arKeys['arrowup']) forwardInput -= 1;
-        if (arKeys['s'] || arKeys['arrowdown']) forwardInput += 1;
-        if (arKeys['a'] || arKeys['arrowleft']) strafeInput -= 1;
-        if (arKeys['d'] || arKeys['arrowright']) strafeInput += 1;
-
-        const isMoving = forwardInput !== 0 || strafeInput !== 0;
-
-        if (isMoving) {
-            // Movimiento relativo al ángulo de la cámara 3D
-            const moveAngle = Math.atan2(strafeInput, forwardInput) + planetCamYaw;
-            astro.rotation.y = moveAngle;
-            astro.position.x += Math.sin(moveAngle) * moveSpeed;
-            astro.position.z += Math.cos(moveAngle) * moveSpeed;
-
-            resolveBaseWallCollisions(astro.position);
+        suitOxygen = Math.max(0, suitOxygen - dt);
+        const o2Pct = Math.round((suitOxygen / maxSuitOxygen) * 100);
+        document.getElementById('primary-bar-label').innerText = `🫁 Oxígeno Traje: ${o2Pct}%`;
+        document.getElementById('primary-bar-fill').style.width = `${o2Pct}%`;
+        if (o2Pct <= 25) {
+            document.getElementById('primary-bar-fill').className = 'progress-fill red';
         }
-
-        astro.position.y += planetAstroVelY;
-        if (!planetAstroGrounded) {
-            planetAstroVelY -= 0.010;
-            if (astro.position.y <= 0) {
-                astro.position.y = 0;
-                planetAstroVelY = 0;
-                planetAstroGrounded = true;
-            }
+        if (suitOxygen <= 0) {
+            stopArenaLoop();
+            showMissionReport(false, 'Se agotó el oxígeno de tu traje espacial en la base. Equipa alas o fuselaje de largo alcance para mayor reserva.');
+            return;
         }
-
-        if (!planetAstroGrounded) {
-            planetAstroRig.leftArm.rotation.x = -0.65;
-            planetAstroRig.rightArm.rotation.x = -0.65;
-            planetAstroRig.leftLeg.rotation.x = 0.25;
-            planetAstroRig.rightLeg.rotation.x = -0.25;
-        } else if (isMoving) {
-            const swing = Math.sin(time * (isRunning ? 16 : 11)) * 0.55;
-            planetAstroRig.leftLeg.rotation.x = swing;
-            planetAstroRig.rightLeg.rotation.x = -swing;
-            planetAstroRig.leftArm.rotation.x = -swing;
-            planetAstroRig.rightArm.rotation.x = swing;
-        } else {
-            planetAstroRig.leftLeg.rotation.x = 0;
-            planetAstroRig.rightLeg.rotation.x = 0;
-            planetAstroRig.leftArm.rotation.x = 0;
-            planetAstroRig.rightArm.rotation.x = 0;
-        }
-
-        MP.sendMyPosition(astro.position.x, astro.position.y, astro.position.z, astro.rotation.y, isMoving);
     }
 
-    // Cámara inmersiva en 3.ª persona detrás del personaje dentro de la estación
-    const camDist = 6.6;
-    const desiredCamX = astro.position.x + Math.sin(planetCamYaw) * camDist;
-    const desiredCamY = 4.3 + astro.position.y * 0.65;
-    const desiredCamZ = astro.position.z + Math.cos(planetCamYaw) * camDist;
-
-    arCamera.position.x += (desiredCamX - arCamera.position.x) * 0.14;
-    arCamera.position.y += (desiredCamY - arCamera.position.y) * 0.14;
-    arCamera.position.z += (desiredCamZ - arCamera.position.z) * 0.14;
-    arCamera.lookAt(
-        astro.position.x - Math.sin(planetCamYaw) * 1.5,
-        1.75 + astro.position.y * 0.7,
-        astro.position.z - Math.cos(planetCamYaw) * 1.5
-    );
-
-    const distToCore = Math.hypot(astro.position.x, astro.position.z);
-    if (distToCore <= 3.65) {
-        oxygen = Math.min(maxOxygen, oxygen + dt * 20);
-    } else if (!isTaskModalOpen) {
-        oxygen -= dt * 0.85;
-    }
-
-    let nearbyTask = null;
-    baseWallTasks.forEach((t, idx) => {
-        if (!t.completed) {
-            t.ringMesh.scale.setScalar(1 + Math.sin(time * 4 + idx) * 0.08);
-            if (Math.hypot(astro.position.x - t.interactPos.x, astro.position.z - t.interactPos.z) < 2.2) {
-                nearbyTask = t;
-            }
+    roleTerminals.forEach((t, idx) => {
+        if (!completedTaskIds.has(t.id)) {
+            t.beacon.rotation.y += dt * 1.5;
+            t.beacon.material.opacity = 0.16 + Math.sin(elapsed * 4 + idx) * 0.08;
         }
     });
 
-    activePlanetTask = nearbyTask;
-    const promptBtn = document.getElementById('arena-interact-prompt');
-    if (activePlanetTask && !isTaskModalOpen) {
-        document.getElementById('arena-task-name').innerText = activePlanetTask.title;
-        promptBtn.classList.remove('hidden');
-    } else {
-        promptBtn.classList.add('hidden');
+    if (baseAstroRig && baseAstroRig.group) {
+        let moving = false;
+        if (!isTaskModalOpen) {
+            let forward = 0;
+            let strafe = 0;
+            if (arenaKeys['KeyW'] || arenaKeys['ArrowUp']) forward -= 1;
+            if (arenaKeys['KeyS'] || arenaKeys['ArrowDown']) forward += 1;
+            if (arenaKeys['KeyA'] || arenaKeys['ArrowLeft']) strafe -= 1;
+            if (arenaKeys['KeyD'] || arenaKeys['ArrowRight']) strafe += 1;
+
+            const speed = (arenaKeys['ShiftLeft'] || arenaKeys['ShiftRight']) ? 0.21 : 0.14;
+            if (forward !== 0 || strafe !== 0) {
+                moving = true;
+                const sinY = Math.sin(baseCamYaw);
+                const cosY = Math.cos(baseCamYaw);
+                const vx = strafe * cosY + forward * sinY;
+                const vz = -strafe * sinY + forward * cosY;
+                const len = Math.hypot(vx, vz) || 1;
+
+                baseAstroRig.group.position.x += (vx / len) * speed;
+                baseAstroRig.group.position.z += (vz / len) * speed;
+                baseAstroRig.group.rotation.y = Math.atan2(vx, vz);
+            }
+        }
+
+        resolveBaseWallCollisions(baseAstroRig.group.position);
+
+        if (!baseAstroGrounded) {
+            baseAstroRig.group.position.y += baseAstroVelY;
+            baseAstroVelY -= 0.013;
+            if (baseAstroRig.group.position.y <= 0) {
+                baseAstroRig.group.position.y = 0;
+                baseAstroVelY = 0;
+                baseAstroGrounded = true;
+            }
+        }
+
+        if (baseAstroRig.propellerMesh) baseAstroRig.propellerMesh.rotation.y += 0.25;
+
+        if (!baseAstroGrounded) {
+            baseAstroRig.leftArm.rotation.x = -0.6;
+            baseAstroRig.rightArm.rotation.x = -0.6;
+        } else if (moving) {
+            const swing = Math.sin(elapsed * 12) * 0.52;
+            baseAstroRig.leftLeg.rotation.x = swing;
+            baseAstroRig.rightLeg.rotation.x = -swing;
+            baseAstroRig.leftArm.rotation.x = -swing;
+            baseAstroRig.rightArm.rotation.x = swing;
+        } else {
+            baseAstroRig.leftLeg.rotation.x = 0;
+            baseAstroRig.rightLeg.rotation.x = 0;
+            baseAstroRig.leftArm.rotation.x = 0;
+            baseAstroRig.rightArm.rotation.x = 0;
+        }
+
+        MP.sendMyPosition(
+            baseAstroRig.group.position.x,
+            baseAstroRig.group.position.y,
+            baseAstroRig.group.position.z,
+            baseAstroRig.group.rotation.y,
+            moving
+        );
+
+        // Detectar terminal de misión cercana
+        let nearest = null;
+        let minDist = 3.2;
+        roleTerminals.forEach(t => {
+            if (completedTaskIds.has(t.id)) return;
+            const d = Math.hypot(baseAstroRig.group.position.x - t.x, baseAstroRig.group.position.z - t.z);
+            if (d < minDist) {
+                minDist = d;
+                nearest = t;
+            }
+        });
+        activeTerminal = nearest;
+
+        const promptBtn = document.getElementById('arena-interact-prompt');
+        if (activeTerminal && !isTaskModalOpen) {
+            document.getElementById('arena-task-name').innerText = activeTerminal.title;
+            promptBtn.classList.remove('hidden');
+        } else {
+            promptBtn.classList.add('hidden');
+        }
+
+        // Cámara tercera persona dentro de la base (sin atravesar paredes ni techo)
+        const camDist = 6.2;
+        const rawCam = new THREE.Vector3(
+            baseAstroRig.group.position.x + Math.sin(baseCamYaw) * camDist,
+            baseAstroRig.group.position.y + 3.6,
+            baseAstroRig.group.position.z + Math.cos(baseCamYaw) * camDist
+        );
+        const lookTarget = new THREE.Vector3(
+            baseAstroRig.group.position.x,
+            baseAstroRig.group.position.y + 1.8,
+            baseAstroRig.group.position.z
+        );
+        clampBaseCameraInsideWalls(rawCam, lookTarget);
+        arenaCamera.position.copy(rawCam);
+        arenaCamera.lookAt(lookTarget);
     }
 
-    const o2Pct = Math.max(0, Math.round((oxygen / maxOxygen) * 100));
-    document.getElementById('primary-bar-label').innerText = distToCore <= 3.65
-        ? `🟢 Mesa Central (O₂ Recargando): ${o2Pct}%`
-        : `🫁 Oxígeno Traje: ${o2Pct}%`;
-    document.getElementById('primary-bar-fill').style.width = `${o2Pct}%`;
-    document.getElementById('primary-bar-fill').className = o2Pct < 25 ? 'progress-fill red' : 'progress-fill green';
+    syncBaseRemoteAstronauts(elapsed, dt);
+    arenaRenderer.render(arenaScene, arenaCamera);
+}
 
-    const missionPct = Math.round((completedTasksCount / 3) * 100);
-    document.getElementById('secondary-bar-label').innerText = completedTasksCount === 3
-        ? `🚀 ¡Vuelve a la Mesa Central Verde!`
-        : `📋 Tareas de ${GAME_STATE.selectedRole.short}: ${completedTasksCount}/3`;
-    document.getElementById('secondary-bar-fill').style.width = `${missionPct}%`;
+// =========================================================================
+// MINIJUEGOS INTERACTIVOS POR ROL (6 MECÁNICAS DISTINTAS)
+// =========================================================================
+function closeTaskModal() {
+    isTaskModalOpen = false;
+    document.getElementById('planet-task-modal').classList.add('hidden');
+}
 
-    if (oxygen <= 0) {
-        showMissionReport(false, 'Te quedaste sin oxígeno en los sectores exteriores de la base.', 0);
-    } else if (completedTasksCount === 3 && distToCore <= 3.65) {
-        // Iniciar viaje espacial de regreso hacia el Planeta Tierra
-        arenaStage = 'return_flight';
-        promptBtn.classList.add('hidden');
-        document.getElementById('arena-phase-title').innerText = `🌍 Regresando al Planeta Tierra`;
-        document.getElementById('arena-hint').innerHTML = `¡Misión cumplida! Pilota tu nave de <b>regreso a la Tierra</b> (<b>W A S D</b> / <b>Flechas</b>)`;
-        document.getElementById('arena-container').classList.add('shaking');
-        setTimeout(() => document.getElementById('arena-container').classList.remove('shaking'), 900);
-        setupSpaceFlightStage('earth');
+function completeCurrentTask(task) {
+    completedTaskIds.add(task.id);
+    task.screenMat.color.setHex(0x10b981);
+    task.screenMat.emissive.setHex(0x10b981);
+    task.beacon.visible = false;
+
+    const total = GAME_STATE.selectedRole.tasks.length;
+    const done = completedTaskIds.size;
+    const pct = Math.round((done / total) * 100);
+
+    document.getElementById('samples-counter').innerText = `📋 Tareas ${GAME_STATE.selectedRole.short}: ${done} / ${total}`;
+    document.getElementById('secondary-bar-label').innerText = `📋 Tareas de ${GAME_STATE.selectedRole.short}: ${done}/${total}`;
+    document.getElementById('secondary-bar-fill').style.width = `${pct}%`;
+
+    closeTaskModal();
+    updateBaseCompassHint();
+
+    if (done >= total) {
+        setTimeout(() => {
+            stopArenaLoop();
+            initFlightPhase('flight_back');
+        }, 900);
     }
 }
 
-let activeMinigameAnim = null;
-
-function openPlanetTaskModal(task) {
+function openTaskMinigame(task) {
     isTaskModalOpen = true;
     const modal = document.getElementById('planet-task-modal');
     const title = document.getElementById('task-modal-title');
     const body = document.getElementById('task-modal-body');
-    title.innerText = `🖥️ ${task.title}`;
 
-    if (task.type === 'timing') {
+    title.innerText = `${task.title} — ${task.roomName}`;
+    modal.classList.remove('hidden');
+
+    if (task.type === 'sequence') {
+        // Minijuego 1: Secuencia numérica ascendente 1 -> 4
+        const nums = [1, 2, 3, 4].sort(() => Math.random() - 0.5);
+        let expected = 1;
         body.innerHTML = `
             <div class="minigame-box">
-                <p style="color:#cbd5e1;">Detén el indicador luminoso justo dentro de la <strong>franja verde central</strong>:</p>
-                <div class="drill-meter">
-                    <div class="drill-target-zone"></div>
-                    <div id="drill-cursor" class="drill-cursor" style="left:0%;"></div>
+                <p style="color:#cbd5e1;">Pulsa los nodos de calibración en orden ascendente (<strong>1 → 2 → 3 → 4</strong>):</p>
+                <div class="seq-grid">
+                    ${nums.map(n => `<button class="seq-btn" data-num="${n}">${n}</button>`).join('')}
                 </div>
-                <p id="drill-feedback" style="color:#38bdf8; min-height:22px; font-weight:600;"></p>
-                <button id="drill-stop-btn" class="btn-primary">⚡ BLOQUEAR CALIBRACIÓN</button>
+                <p id="seq-msg" style="color:#38bdf8; font-weight:600; min-height:22px;"></p>
             </div>
         `;
-        let pos = 0;
-        let dir = 1;
-        const cursor = document.getElementById('drill-cursor');
-        function moveCursor() {
-            pos += dir * 1.45;
-            if (pos >= 96) { pos = 96; dir = -1; }
-            if (pos <= 0) { pos = 0; dir = 1; }
-            cursor.style.left = `${pos}%`;
-            activeMinigameAnim = requestAnimationFrame(moveCursor);
-        }
-        activeMinigameAnim = requestAnimationFrame(moveCursor);
+        body.querySelectorAll('.seq-btn').forEach(btn => {
+            btn.onclick = () => {
+                const val = parseInt(btn.dataset.num, 10);
+                if (val === expected) {
+                    btn.classList.add('done');
+                    expected++;
+                    if (expected > 4) {
+                        completeCurrentTask(task);
+                    }
+                } else {
+                    expected = 1;
+                    body.querySelectorAll('.seq-btn').forEach(b => b.classList.remove('done'));
+                    document.getElementById('seq-msg').innerText = '⚠️ Orden incorrecto, secuencia reiniciada.';
+                }
+            };
+        });
 
-        document.getElementById('drill-stop-btn').onclick = () => {
-            if (pos >= 34 && pos <= 64) {
-                cancelAnimationFrame(activeMinigameAnim);
-                completePlanetTask(task);
+    } else if (task.type === 'timing') {
+        // Minijuego 2: Detener cursor en zona verde
+        body.innerHTML = `
+            <div class="minigame-box">
+                <p style="color:#cbd5e1;">Detén el estabilizador cuando el cursor azul esté dentro de la <strong>zona verde central</strong>:</p>
+                <div class="drill-meter">
+                    <div class="drill-target-zone"></div>
+                    <div class="drill-cursor" id="timing-cursor" style="left:10%;"></div>
+                </div>
+                <button id="timing-lock-btn" class="btn-primary">⚡ FIJAR ESTABILIZADOR</button>
+                <p id="timing-msg" style="color:#fbbf24; font-weight:600; margin-top:8px;"></p>
+            </div>
+        `;
+        let pos = 5;
+        let dir = 1;
+        const cursor = document.getElementById('timing-cursor');
+        const interval = setInterval(() => {
+            if (!isTaskModalOpen) { clearInterval(interval); return; }
+            pos += dir * 2.4;
+            if (pos >= 94) { pos = 94; dir = -1; }
+            if (pos <= 2) { pos = 2; dir = 1; }
+            cursor.style.left = pos + '%';
+        }, 25);
+
+        document.getElementById('timing-lock-btn').onclick = () => {
+            if (pos >= 35 && pos <= 65) {
+                clearInterval(interval);
+                completeCurrentTask(task);
             } else {
-                document.getElementById('drill-feedback').innerText = '⚠️ Fuera de zona verde, ¡intenta de nuevo!';
+                document.getElementById('timing-msg').innerText = '⚠️ Fuera de rango óptimo, intenta nuevamente.';
+            }
+        };
+
+    } else if (task.type === 'slider') {
+        // Minijuego 3: Sintonizador de frecuencia / presión exacta
+        const targetVal = Math.floor(25 + Math.random() * 55);
+        body.innerHTML = `
+            <div class="minigame-box">
+                <p style="color:#cbd5e1;">Ajusta el dial hasta alcanzar la lectura objetivo: <strong style="color:#10b981; font-size:1.15rem;">${targetVal}.0 MHz</strong></p>
+                <input type="range" id="freq-slider" min="10" max="90" value="50" style="width:100%; margin:20px 0; accent-color:#38bdf8;">
+                <div style="font-size:1.3rem; font-weight:800; color:#38bdf8; margin-bottom:12px;">Lectura Actual: <span id="freq-readout">50</span>.0 MHz</div>
+                <button id="freq-confirm-btn" class="btn-primary">📡 BLOQUEAR FRECUENCIA</button>
+                <p id="freq-msg" style="color:#fbbf24; font-weight:600; margin-top:8px;"></p>
+            </div>
+        `;
+        const slider = document.getElementById('freq-slider');
+        const readout = document.getElementById('freq-readout');
+        slider.oninput = () => { readout.innerText = slider.value; };
+        document.getElementById('freq-confirm-btn').onclick = () => {
+            const diff = Math.abs(parseInt(slider.value, 10) - targetVal);
+            if (diff <= 2) {
+                completeCurrentTask(task);
+            } else {
+                document.getElementById('freq-msg').innerText = `⚠️ Desviación detectada (acércate más a ${targetVal}.0 MHz).`;
             }
         };
 
     } else if (task.type === 'wires') {
-        const colors = [
-            { id: 'cyan', label: 'Línea Alfa (Cian)', hex: '#0284c7' },
-            { id: 'amber', label: 'Línea Beta (Ámbar)', hex: '#d97706' },
-            { id: 'green', label: 'Línea Gamma (Verde)', hex: '#059669' }
+        // Minijuego 4: Conexión de cables de colores
+        const wires = [
+            { id: 'red', label: 'Bus Rojo', color: '#ef4444' },
+            { id: 'blue', label: 'Bus Azul', color: '#3b82f6' },
+            { id: 'green', label: 'Bus Verde', color: '#10b981' },
+            { id: 'amber', label: 'Bus Ámbar', color: '#f59e0b' }
         ];
-        const rightOrder = [colors[2], colors[0], colors[1]];
+        const rightWires = [...wires].sort(() => Math.random() - 0.5);
         let selectedLeft = null;
         let connectedCount = 0;
 
         body.innerHTML = `
             <div class="minigame-box">
-                <p style="color:#cbd5e1;">Une cada terminal de la izquierda con su par del mismo color a la derecha:</p>
+                <p style="color:#cbd5e1;">Conecta cada terminal izquierda con su par del mismo color a la derecha:</p>
                 <div class="wire-grid">
-                    <div class="wire-col" id="wire-left">
-                        ${colors.map(c => `<button class="wire-node" data-id="${c.id}" style="background:${c.hex};">${c.label}</button>`).join('')}
+                    <div class="wire-col">
+                        ${wires.map(w => `<button class="wire-node" data-side="L" data-wid="${w.id}" style="background:${w.color};">${w.label}</button>`).join('')}
                     </div>
-                    <div class="wire-col" id="wire-right">
-                        ${rightOrder.map(c => `<button class="wire-node" data-id="${c.id}" style="background:${c.hex};">${c.label}</button>`).join('')}
+                    <div class="wire-col">
+                        ${rightWires.map(w => `<button class="wire-node" data-side="R" data-wid="${w.id}" style="background:${w.color};">${w.label}</button>`).join('')}
                     </div>
                 </div>
-                <p id="wire-status" style="color:#38bdf8; font-weight:600;">Conexiones: 0 / 3</p>
             </div>
         `;
 
-        document.querySelectorAll('#wire-left .wire-node').forEach(btn => {
+        body.querySelectorAll('.wire-node').forEach(btn => {
             btn.onclick = () => {
                 if (btn.classList.contains('connected')) return;
-                document.querySelectorAll('#wire-left .wire-node').forEach(b => b.classList.remove('active'));
-                btn.classList.add('active');
-                selectedLeft = btn;
-            };
-        });
+                const side = btn.dataset.side;
+                const wid = btn.dataset.wid;
 
-        document.querySelectorAll('#wire-right .wire-node').forEach(btn => {
-            btn.onclick = () => {
-                if (!selectedLeft || btn.classList.contains('connected')) return;
-                if (selectedLeft.dataset.id === btn.dataset.id) {
-                    selectedLeft.classList.remove('active');
-                    selectedLeft.classList.add('connected');
-                    btn.classList.add('connected');
-                    selectedLeft = null;
-                    connectedCount++;
-                    document.getElementById('wire-status').innerText = `Conexiones: ${connectedCount} / 3`;
-                    if (connectedCount === 3) setTimeout(() => completePlanetTask(task), 300);
-                } else {
-                    selectedLeft.classList.remove('active');
-                    selectedLeft = null;
-                    document.getElementById('wire-status').innerText = '❌ Color distinto. Selecciona el par correcto.';
+                if (side === 'L') {
+                    body.querySelectorAll('[data-side="L"]').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    selectedLeft = btn;
+                } else if (side === 'R' && selectedLeft) {
+                    if (selectedLeft.dataset.wid === wid) {
+                        selectedLeft.classList.remove('active');
+                        selectedLeft.classList.add('connected');
+                        btn.classList.add('connected');
+                        selectedLeft = null;
+                        connectedCount++;
+                        if (connectedCount >= 4) {
+                            completeCurrentTask(task);
+                        }
+                    } else {
+                        selectedLeft.classList.remove('active');
+                        selectedLeft = null;
+                    }
                 }
             };
         });
 
     } else if (task.type === 'temp') {
-        let currentTemp = 15;
+        // Minijuego 5: Regulador térmico criogénico
+        let currentTemp = -12;
+        const targetTemp = -45;
         body.innerHTML = `
             <div class="minigame-box">
-                <p style="color:#cbd5e1;">Estabiliza la cámara térmica exactamente en <strong>-40 °C</strong>:</p>
+                <p style="color:#cbd5e1;">Estabiliza la cámara criogénica exactamente a <strong style="color:#38bdf8;">${targetTemp}°C</strong>:</p>
                 <div class="temp-controls">
-                    <button id="temp-down" class="temp-btn" style="background:#0284c7;">❄️ Enfriar (-15°)</button>
-                    <div style="font-size:2rem; font-weight:700; min-width:120px; color:#38bdf8;" id="temp-readout">15 °C</div>
-                    <button id="temp-up" class="temp-btn" style="background:#ea580c;">🔥 Calentar (+5°)</button>
+                    <button class="temp-btn" id="temp-down" style="background:#0284c7;">❄️ -11°C</button>
+                    <div id="temp-display" style="font-size:1.8rem; font-weight:800; min-width:110px;">${currentTemp}°C</div>
+                    <button class="temp-btn" id="temp-up" style="background:#ea580c;">🔥 +5°C</button>
                 </div>
-                <p style="color:#94a3b8; font-size:0.85rem;">Meta requerida: <strong>-40 °C</strong></p>
+                <button id="temp-confirm" class="btn-primary">✓ SELLAR CÁMARA CRIOGÉNICA</button>
             </div>
         `;
-        const updateTemp = () => {
-            document.getElementById('temp-readout').innerText = `${currentTemp} °C`;
-            if (currentTemp === -40) {
-                document.getElementById('temp-readout').style.color = '#10b981';
-                setTimeout(() => completePlanetTask(task), 350);
-            }
+        const disp = document.getElementById('temp-display');
+        document.getElementById('temp-down').onclick = () => {
+            currentTemp -= 11;
+            disp.innerText = `${currentTemp}°C`;
         };
-        document.getElementById('temp-down').onclick = () => { currentTemp -= 15; updateTemp(); };
-        document.getElementById('temp-up').onclick = () => { currentTemp += 5; updateTemp(); };
-
-    } else if (task.type === 'sequence') {
-        const order = [3, 1, 4, 2];
-        let nextExpected = 1;
-        body.innerHTML = `
-            <div class="minigame-box">
-                <p style="color:#cbd5e1;">Activa los nodos en orden ascendente del <strong>1 al 4</strong>:</p>
-                <div class="seq-grid">
-                    ${order.map(num => `<button class="seq-btn" data-num="${num}">${num}</button>`).join('')}
-                </div>
-                <p id="seq-status" style="color:#38bdf8; font-weight:600;">Siguiente nodo: 1</p>
-            </div>
-        `;
-        document.querySelectorAll('.seq-btn').forEach(btn => {
-            btn.onclick = () => {
-                const val = parseInt(btn.dataset.num, 10);
-                if (val === nextExpected) {
-                    btn.classList.add('done');
-                    nextExpected++;
-                    document.getElementById('seq-status').innerText = nextExpected <= 4 ? `Siguiente nodo: ${nextExpected}` : '¡Secuencia completa!';
-                    if (nextExpected > 4) setTimeout(() => completePlanetTask(task), 300);
-                } else if (!btn.classList.contains('done')) {
-                    document.getElementById('seq-status').innerText = `⚠️ Orden incorrecto. Busca el número ${nextExpected}`;
-                }
-            };
-        });
-
-    } else if (task.type === 'slider') {
-        const targetHz = 72;
-        body.innerHTML = `
-            <div class="minigame-box">
-                <p style="color:#cbd5e1;">Mueve el sintonizador hasta alcanzar la frecuencia objetivo de <strong>${targetHz} MHz</strong>:</p>
-                <div style="font-size:2rem; font-weight:800; color:#38bdf8; margin:14px 0;" id="hz-display">40 MHz</div>
-                <input type="range" id="hz-slider" min="20" max="100" value="40" style="width:90%; accent-color:#38bdf8; cursor:pointer;">
-                <p id="hz-feedback" style="color:#94a3b8; margin-top:10px;">Rango válido: 70 - 74 MHz</p>
-                <button id="hz-confirm-btn" class="btn-primary">📡 FIJAR SEÑAL</button>
-            </div>
-        `;
-        const slider = document.getElementById('hz-slider');
-        slider.oninput = () => {
-            document.getElementById('hz-display').innerText = `${slider.value} MHz`;
+        document.getElementById('temp-up').onclick = () => {
+            currentTemp += 5;
+            disp.innerText = `${currentTemp}°C`;
         };
-        document.getElementById('hz-confirm-btn').onclick = () => {
-            const val = parseInt(slider.value, 10);
-            if (Math.abs(val - targetHz) <= 2) {
-                completePlanetTask(task);
-            } else {
-                document.getElementById('hz-feedback').innerText = '⚠️ Señal ruidosa, acércate más a 72 MHz.';
+        document.getElementById('temp-confirm').onclick = () => {
+            if (Math.abs(currentTemp - targetTemp) <= 3) {
+                completeCurrentTask(task);
             }
         };
 
-    } else if (task.type === 'rivets') {
-        let sealedCount = 0;
+    } else {
+        // Minijuego 6 ('rivets'): Sellar 5 remaches de compuerta presurizada
         const spots = [
-            { top: '22%', left: '18%' },
-            { top: '62%', left: '28%' },
-            { top: '26%', left: '72%' },
-            { top: '65%', left: '66%' }
+            { top: '18%', left: '15%' },
+            { top: '22%', left: '75%' },
+            { top: '50%', left: '46%' },
+            { top: '72%', left: '22%' },
+            { top: '70%', left: '72%' }
         ];
+        let sealed = 0;
         body.innerHTML = `
             <div class="minigame-box">
-                <p style="color:#cbd5e1;">Haz clic en los <strong>4 puntos rojos de fuga</strong> para sellar el mamparo de la base:</p>
+                <p style="color:#cbd5e1;">Haz clic en los <strong>5 puntos rojos de fuga</strong> para soldar y presurizar la compuerta:</p>
                 <div class="rivet-panel">
-                    ${spots.map((s, i) => `<button class="rivet-spot" style="top:${s.top}; left:${s.left};" data-idx="${i}">!</button>`).join('')}
+                    ${spots.map((s, i) => `<button class="rivet-spot" data-idx="${i}" style="top:${s.top}; left:${s.left};">!</button>`).join('')}
                 </div>
-                <p id="rivet-status" style="color:#38bdf8; font-weight:600;">Fugas selladas: 0 / 4</p>
             </div>
         `;
-        document.querySelectorAll('.rivet-spot').forEach(btn => {
+        body.querySelectorAll('.rivet-spot').forEach(btn => {
             btn.onclick = () => {
                 if (btn.classList.contains('sealed')) return;
                 btn.classList.add('sealed');
                 btn.innerText = '✓';
-                sealedCount++;
-                document.getElementById('rivet-status').innerText = `Fugas selladas: ${sealedCount} / 4`;
-                if (sealedCount === 4) setTimeout(() => completePlanetTask(task), 300);
+                sealed++;
+                if (sealed >= spots.length) {
+                    completeCurrentTask(task);
+                }
             };
         });
     }
-
-    modal.classList.remove('hidden');
 }
 
-function completePlanetTask(task) {
-    task.completed = true;
-    task.ringMesh.visible = false;
-    task.light.intensity = 0.2;
-    task.leftTube.material.color.setHex(0x10b981);
-    task.rightTube.material.color.setHex(0x10b981);
-    task.screenMesh.material.map = createWallMonitorTexture(task.wallLabel, 'Operación finalizada', '#10b981', true);
-    task.screenMesh.material.needsUpdate = true;
-
-    completedTasksCount++;
-    document.getElementById('samples-counter').innerText = `📋 Tareas: ${completedTasksCount} / 3`;
-    closePlanetTaskModal();
-}
-
-function closePlanetTaskModal() {
-    if (activeMinigameAnim) cancelAnimationFrame(activeMinigameAnim);
-    isTaskModalOpen = false;
-    document.getElementById('planet-task-modal').classList.add('hidden');
-}
-
-function clearArenaScene() {
-    while (arScene.children.length > 0) {
-        arScene.remove(arScene.children[0]);
-    }
-}
-
-function showMissionReport(success, message, earnedCredits) {
-    cancelAnimationFrame(arAnimId);
+function showMissionReport(success, message) {
     const modal = document.getElementById('report-modal');
-    document.getElementById('report-title').innerText = success ? '🎉 ¡Regreso a la Tierra Exitoso!' : '⚠️ Misión Abortada';
-    document.getElementById('report-desc').innerText = message;
-    document.getElementById('report-stats').innerHTML = `
-        <div><strong>Expedición</strong><br>${GAME_STATE.selectedMission.name}</div>
-        <div><strong>Recompensa Ganada</strong><br><span style="color:#fbbf24; font-weight:800;">+${earnedCredits} CR</span></div>
-        <div><strong>Saldo Total</strong><br><span style="color:#34d399; font-weight:800;">${GAME_STATE.credits} CR</span></div>
+    const title = document.getElementById('report-title');
+    const desc = document.getElementById('report-desc');
+    const statsBox = document.getElementById('report-stats');
+
+    title.innerText = success ? '🎉 ¡Misión Completada con Éxito!' : '⚠️ Misión Abortada';
+    desc.innerText = message;
+
+    statsBox.innerHTML = `
+        <div><small style="color:#94a3b8;">DESTINO</small><br><strong>${GAME_STATE.selectedMission.name}</strong></div>
+        <div><small style="color:#94a3b8;">ROL EJERCIDO</small><br><strong>${GAME_STATE.selectedRole.short}</strong></div>
+        <div><small style="color:#94a3b8;">SALDO TOTAL</small><br><strong style="color:#fbbf24;">${GAME_STATE.credits} CR</strong></div>
     `;
+
     modal.classList.remove('hidden');
-
-    document.getElementById('return-hub-btn').onclick = () => {
-        modal.classList.add('hidden');
-        returnToHub(success);
-    };
-}
-
-function returnToHub(completedSuccess) {
-    cancelAnimationFrame(arAnimId);
-    closePlanetTaskModal();
-    document.getElementById('arena-container').classList.add('hidden');
-    document.getElementById('control-center-container').classList.remove('hidden');
-
-    if (completedSuccess) {
-        updateWindowPlanet('earth');
-    }
-    animateControlCenter();
-}
-
-function animateArena() {
-    arAnimId = requestAnimationFrame(animateArena);
-    const now = performance.now();
-    const dt = Math.min(0.05, (now - lastFrameTime) / 1000);
-    lastFrameTime = now;
-
-    if (arenaStage === 'flight') {
-        updateSpaceFlight(dt, false);
-    } else if (arenaStage === 'return_flight') {
-        updateSpaceFlight(dt, true);
-    } else {
-        updatePlanetExploration(now * 0.001, dt);
-    }
-    arRenderer.render(arScene, arCamera);
+    document.getElementById('return-hub-btn').onclick = returnToControlCenter;
 }
