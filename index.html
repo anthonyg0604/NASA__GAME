@@ -15,16 +15,16 @@
         <div class="modal-card lobby-card">
             <div class="modal-header">
                 <h2>🚀 Sala de Tripulación Espacial (1 - 4 Jugadores)</h2>
-                <span class="badge-online" id="net-status-badge">● Listo para conectar</span>
+                <span class="badge-online" id="net-status-badge">● Conectando red...</span>
             </div>
 
             <div class="lobby-grid">
                 <div>
-                    <div class="section-label">1. Tu Nombre de Tripulante</div>
-                    <input type="text" id="player-name-input" class="text-input" value="Pablo" maxlength="16" placeholder="Escribe tu nombre...">
-
-                    <div class="section-label">2. Elige tu Personaje (Backyardigans)</div>
+                    <div class="section-label">1. Elige tu Personaje (Backyardigans)</div>
                     <div class="char-grid" id="lobby-char-grid"></div>
+
+                    <div class="section-label">2. Nombre en la Sala</div>
+                    <input type="text" id="player-name-input" class="text-input" value="Pablo" maxlength="16" placeholder="Escribe tu nombre...">
 
                     <div class="section-label">3. Elige tu Rol en la Nave</div>
                     <div class="role-mini-grid" id="lobby-role-grid"></div>
@@ -60,10 +60,10 @@
 
                     <!-- Panel Unirse a Sala -->
                     <div id="panel-join-room" class="room-box hidden">
-                        <p style="font-size:0.85rem; color:#94a3b8; margin-bottom:8px;">Ingresa el código de 4 dígitos de tu anfitrión:</p>
-                        <input type="text" id="join-code-input" class="text-input code-input" maxlength="4" placeholder="Ej: 4821">
-                        <p id="join-feedback" style="font-size:0.82rem; color:#38bdf8; min-height:20px; margin:6px 0;"></p>
-                        <button id="connect-room-btn" class="btn-primary">🔗 CONECTAR A LA SALA</button>
+                        <p style="font-size:0.85rem; color:#94a3b8; margin-bottom:8px;">Ingresa el código de 4 dígitos que creó el anfitrión:</p>
+                        <input type="text" id="join-code-input" class="text-input code-input" maxlength="4" inputmode="numeric" placeholder="Ej: 4821">
+                        <p id="join-feedback" style="font-size:0.84rem; color:#38bdf8; min-height:24px; margin:6px 0; font-weight:600;"></p>
+                        <button id="connect-room-btn" class="btn-primary">🔗 INGRESAR A LA SALA</button>
                     </div>
                 </div>
             </div>
@@ -116,7 +116,7 @@
         </div>
     </div>
 
-    <!-- FASES 2 Y 3: VUELO ESPACIAL Y BASE PLANETARIA 3D -->
+    <!-- FASES 2, 3 Y 4: IDA, BASE PLANETARIA 3D Y REGRESO A LA TIERRA -->
     <div id="arena-container" class="hidden">
         <div class="arena-hud">
             <div class="hud-box">
@@ -153,7 +153,7 @@
         <div id="arena-webgl-container"></div>
     </div>
 
-    <!-- MINIJUEGOS INTERACTIVOS EN LAS PAREDES DE LA BASE -->
+    <!-- MINIJUEGOS INTERACTIVOS EN LA BASE -->
     <div id="planet-task-modal" class="modal hidden">
         <div class="modal-card">
             <div class="modal-header">
