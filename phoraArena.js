@@ -12,7 +12,7 @@ let shipShield = 100;
 let maxShipShield = 100;
 let flightProgress = 0;
 
-// Fase complejo espacial 6x6 (144x144 unidades con pasillos largos y habitaciones)
+// Fase complejo espacial 6x6 (ampliado con BASE_MAP_SCALE)
 let baseAstroRig = null;
 let baseAstroVelY = 0;
 let baseAstroGrounded = true;
@@ -28,6 +28,8 @@ let completedTaskIds = new Set();
 let suitOxygen = 110;
 let maxSuitOxygen = 110;
 var baseCamYaw = 0;
+var baseCamPitch = 0.32;
+const BASE_MAP_SCALE = 1.35;
 let botTaskTimer = 0;
 
 function startPhoraArena() {
@@ -124,10 +126,33 @@ function setupArenaEvents() {
 
     document.getElementById('close-task-modal-btn').onclick = closeTaskModal;
 
-    document.getElementById('abort-mission-btn').onclick = () => {
+    const handleExitToRoomMenu = () => {
         stopArenaLoop();
+        resetAllInputStates();
+        unlockGamePointer();
+        const radarBox = document.getElementById('sector-radar-box');
+        if (radarBox) radarBox.classList.add('hidden');
+        const arenaCont = document.getElementById('arena-container');
+        if (arenaCont) arenaCont.classList.add('hidden');
+        if (typeof MP !== 'undefined') {
+            if (typeof MP.leaveRoom === 'function') MP.leaveRoom();
+            else if (typeof MP.disconnect === 'function') MP.disconnect();
+        }
         returnToControlCenter();
     };
+
+    document.getElementById('abort-mission-btn').onclick = handleExitToRoomMenu;
+    const backRoomBtn = document.getElementById('arena-back-room-btn');
+    if (backRoomBtn) backRoomBtn.onclick = handleExitToRoomMenu;
+
+    if (!window._arenaVerticalMouseBound) {
+        window._arenaVerticalMouseBound = true;
+        document.addEventListener('mousemove', e => {
+            if (document.pointerLockElement && arenaPhase === 'base_ops' && !isTaskModalOpen && !isAnyGameModalOpen()) {
+                baseCamPitch = Math.max(-0.35, Math.min(1.05, baseCamPitch + e.movementY * 0.0024));
+            }
+        });
+    }
 }
 
 function stopArenaLoop() {
@@ -144,7 +169,7 @@ function resetArenaRenderer() {
     holder.innerHTML = '';
 
     arenaScene = new THREE.Scene();
-    arenaCamera = new THREE.PerspectiveCamera(58, holder.clientWidth / holder.clientHeight, 0.1, 190);
+    arenaCamera = new THREE.PerspectiveCamera(58, holder.clientWidth / holder.clientHeight, 0.1, 220);
     arenaRenderer = new THREE.WebGLRenderer({ antialias: true });
     arenaRenderer.setSize(holder.clientWidth, holder.clientHeight);
     arenaRenderer.shadowMap.enabled = true;
@@ -254,7 +279,6 @@ function initFlightPhase(phaseType) {
     document.getElementById('secondary-bar-fill').style.width = '0%';
 
     if (isReturn) {
-        // Al volver a la Tierra ya no aparecen meteoritos ni instrucciones de esquivar
         hintBar.classList.add('hidden');
     } else {
         hintBar.classList.remove('hidden');
@@ -280,7 +304,6 @@ function initFlightPhase(phaseType) {
     flightRocket.position.set(0, 0, 4);
     arenaScene.add(flightRocket);
 
-    // Solo generar meteoritos en el viaje de ida
     if (!isReturn) {
         const rockCount = mission.asteroidCount;
         const rockMat = new THREE.MeshStandardMaterial({ color: 0x64748b, roughness: 0.85, metalness: 0.15 });
@@ -334,7 +357,6 @@ function animateFlightPhase(now) {
             flightRocket.position.y = Math.max(-6.2, Math.min(6.2, flightRocket.position.y + dy * moveSpeed * dt));
             flightRocket.rotation.z = -dx * 0.35;
         } else {
-            // Piloto automático suave centrado hacia la Tierra
             flightRocket.position.x += (0 - flightRocket.position.x) * 3 * dt;
             flightRocket.position.y += (0.4 - flightRocket.position.y) * 3 * dt;
             flightRocket.rotation.z = Math.sin(tNow * 0.002) * 0.06;
@@ -415,7 +437,7 @@ function animateFlightPhase(now) {
 }
 
 // =========================================================================
-// FASE 2: COMPLEJO ESPACIAL 144x144 (36 SECTORES, PASILLOS LARGOS Y RADAR)
+// FASE 2: COMPLEJO ESPACIAL AMPLIADO (36 SECTORES, PASILLOS LARGOS Y RADAR)
 // =========================================================================
 function initPlanetaryBasePhase() {
     arenaPhase = 'base_ops';
@@ -425,8 +447,8 @@ function initPlanetaryBasePhase() {
     remoteBaseAstros = {};
     flickeringLights = [];
     baseCamYaw = 0;
+    baseCamPitch = 0.32;
 
-    // Mostrar radar de sectores y ocultar barra inferior genérica
     document.getElementById('sector-radar-box').classList.remove('hidden');
     document.getElementById('arena-hint').classList.remove('hidden');
 
@@ -436,7 +458,7 @@ function initPlanetaryBasePhase() {
     const role = GAME_STATE.selectedRole;
 
     arenaScene.background = new THREE.Color(0x040812);
-    arenaScene.fog = new THREE.Fog(0x050a16, 28, 86);
+    arenaScene.fog = new THREE.Fog(0x050a16, 32, 115);
 
     const o2Pct = Math.round((suitOxygen / maxSuitOxygen) * 100);
     document.getElementById('arena-phase-title').innerText = `🏛️ Estación Orbital — ${mission.name}`;
@@ -480,7 +502,6 @@ function createSpaceshipHullTexture(accentHexCss) {
     ctx.fillStyle = '#162033';
     ctx.fillRect(0, 0, 512, 512);
 
-    // Placas metálicas horizontales y verticales de mamparo espacial
     ctx.strokeStyle = '#0b1120';
     ctx.lineWidth = 6;
     ctx.strokeRect(6, 6, 500, 500);
@@ -490,7 +511,6 @@ function createSpaceshipHullTexture(accentHexCss) {
     ctx.lineTo(256, 506);
     ctx.stroke();
 
-    // Remaches metálicos en esquinas de cada placa
     ctx.fillStyle = '#475569';
     const rivets = [22, 236, 276, 490];
     const rows = [24, 150, 190, 322, 360, 488];
@@ -502,7 +522,6 @@ function createSpaceshipHullTexture(accentHexCss) {
         });
     });
 
-    // Rejilla de ventilación superior
     ctx.fillStyle = '#090d16';
     ctx.fillRect(42, 46, 176, 78);
     ctx.fillStyle = '#334155';
@@ -510,7 +529,6 @@ function createSpaceshipHullTexture(accentHexCss) {
         ctx.fillRect(50, y, 160, 5);
     }
 
-    // Panel de circuitos luminosos en placa derecha
     ctx.fillStyle = '#0b1324';
     ctx.fillRect(290, 46, 176, 78);
     ctx.fillStyle = accentHexCss;
@@ -520,7 +538,6 @@ function createSpaceshipHullTexture(accentHexCss) {
     ctx.fillStyle = '#f59e0b';
     ctx.fillRect(306, 102, 60, 8);
 
-    // Franja industrial diagonal de seguridad inferior
     ctx.fillStyle = '#0f172a';
     ctx.fillRect(10, 444, 492, 42);
     ctx.fillStyle = '#d97706';
@@ -579,17 +596,17 @@ function addSolidWallBox(cx, cz, widthX, depthZ, heightY, wallMat, trimMat, topT
 }
 
 function addInteriorCorridorChute(cx, cz, axis, wallMat, ribMat, accentMat) {
-    // Crea pasillos estrechos tipo nave espacial con costillas estructurales y tuberías laterales
-    const corridorLen = 11.5;
-    const halfGap = 2.85;
+    const corridorLen = 11.5 * BASE_MAP_SCALE;
+    const halfGap = 2.85 * BASE_MAP_SCALE;
     const wallThick = 0.85;
     const wallH = 11.0;
+    const archOffsets = [-4.2, 0, 4.2].map(v => v * BASE_MAP_SCALE);
 
     if (axis === 'X') {
         addSolidWallBox(cx, cz - halfGap - wallThick / 2, corridorLen, wallThick, wallH, wallMat, accentMat, null);
         addSolidWallBox(cx, cz + halfGap + wallThick / 2, corridorLen, wallThick, wallH, wallMat, accentMat, null);
 
-        [-4.2, 0, 4.2].forEach(ox => {
+        archOffsets.forEach(ox => {
             const arch = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.55, halfGap * 2 + 0.4), ribMat);
             arch.position.set(cx + ox, 5.4, cz);
             arenaScene.add(arch);
@@ -598,7 +615,7 @@ function addInteriorCorridorChute(cx, cz, axis, wallMat, ribMat, accentMat) {
         addSolidWallBox(cx - halfGap - wallThick / 2, cz, wallThick, corridorLen, wallH, wallMat, accentMat, null);
         addSolidWallBox(cx + halfGap + wallThick / 2, cz, wallThick, corridorLen, wallH, wallMat, accentMat, null);
 
-        [-4.2, 0, 4.2].forEach(oz => {
+        archOffsets.forEach(oz => {
             const arch = new THREE.Mesh(new THREE.BoxGeometry(halfGap * 2 + 0.4, 0.55, 0.45), ribMat);
             arch.position.set(cx, 5.4, cz + oz);
             arenaScene.add(arch);
@@ -616,12 +633,11 @@ function decorateSpaceshipComplex(mission, sectorCenters, wallH) {
     const viewportGlassMat = new THREE.MeshBasicMaterial({ color: 0x020617 });
 
     const pillarGeo = new THREE.BoxGeometry(1.1, wallH, 1.1);
-    const pipeGeo = new THREE.CylinderGeometry(0.16, 0.16, 23.0, 10);
+    const pipeGeo = new THREE.CylinderGeometry(0.16, 0.16, 23.0 * BASE_MAP_SCALE, 10);
     const viewportFrameGeo = new THREE.BoxGeometry(7.2, 3.0, 0.35);
     const viewportGlassGeo = new THREE.BoxGeometry(6.6, 2.4, 0.4);
 
-    // 1. Costillas estructurales en todas las intersecciones de la nave (5x5 = 25 columnas maestras)
-    const wallLines = [-48, -24, 0, 24, 48];
+    const wallLines = [-48, -24, 0, 24, 48].map(v => v * BASE_MAP_SCALE);
     wallLines.forEach(wx => {
         wallLines.forEach(wz => {
             const col = new THREE.Mesh(pillarGeo, ribMat);
@@ -644,7 +660,6 @@ function decorateSpaceshipComplex(mission, sectorCenters, wallH) {
         });
     });
 
-    // 2. Tuberías industriales, luminarias de techo y módulos de ingeniería en los 36 sectores
     sectorCenters.forEach((sx, ix) => {
         sectorCenters.forEach((sz, iz) => {
             const isFlicker = (ix * 3 + iz) % 7 === 3;
@@ -654,7 +669,7 @@ function decorateSpaceshipComplex(mission, sectorCenters, wallH) {
             arenaScene.add(lamp);
 
             if ((ix + iz) % 2 === 0) {
-                const pLight = new THREE.PointLight(isFlicker ? 0xfde047 : mission.accentColor, 0.85, 36);
+                const pLight = new THREE.PointLight(isFlicker ? 0xfde047 : mission.accentColor, 0.85, 42);
                 pLight.position.set(sx, wallH - 1.6, sz);
                 arenaScene.add(pLight);
                 if (isFlicker) {
@@ -662,21 +677,19 @@ function decorateSpaceshipComplex(mission, sectorCenters, wallH) {
                 }
             }
 
-            // Doble tubería superior (acero + cobre)
             const pipeX1 = new THREE.Mesh(pipeGeo, pipeMat);
             pipeX1.rotation.z = Math.PI / 2;
-            pipeX1.position.set(sx, wallH - 1.1, sz - 9.8);
+            pipeX1.position.set(sx, wallH - 1.1, sz - 9.8 * BASE_MAP_SCALE);
             arenaScene.add(pipeX1);
 
             const pipeX2 = new THREE.Mesh(pipeGeo, copperPipeMat);
             pipeX2.rotation.z = Math.PI / 2;
-            pipeX2.position.set(sx, wallH - 1.5, sz - 9.8);
+            pipeX2.position.set(sx, wallH - 1.5, sz - 9.8 * BASE_MAP_SCALE);
             arenaScene.add(pipeX2);
 
-            // Racks de servidores holográficos y cilindros de soporte vital en esquinas de salas
             if ((ix + iz) % 2 === 1 && !(ix === 2 && iz === 2)) {
                 const rack = new THREE.Mesh(new THREE.BoxGeometry(2.5, 3.8, 0.85), darkRackMat);
-                rack.position.set(sx + 8.6, 1.9, sz + 8.6);
+                rack.position.set(sx + 8.6 * BASE_MAP_SCALE, 1.9, sz + 8.6 * BASE_MAP_SCALE);
                 rack.rotation.y = -Math.PI / 4;
                 arenaScene.add(rack);
 
@@ -684,27 +697,26 @@ function decorateSpaceshipComplex(mission, sectorCenters, wallH) {
                     new THREE.BoxGeometry(2.0, 1.25, 0.1),
                     (ix + iz) % 4 === 1 ? screenBlueMat : screenGreenMat
                 );
-                scr.position.set(sx + 8.28, 2.45, sz + 8.28);
+                scr.position.set(sx + 8.28 * BASE_MAP_SCALE, 2.45, sz + 8.28 * BASE_MAP_SCALE);
                 scr.rotation.y = -Math.PI / 4;
                 arenaScene.add(scr);
             }
 
-            // Tanques criogénicos verticales en sectores pares
             if ((ix * 2 + iz) % 3 === 0 && !(ix === 2 && iz === 2)) {
                 const tank = new THREE.Mesh(
                     new THREE.CylinderGeometry(0.65, 0.65, 4.2, 16),
                     copperPipeMat
                 );
-                tank.position.set(sx - 8.8, 2.1, sz - 8.8);
+                tank.position.set(sx - 8.8 * BASE_MAP_SCALE, 2.1, sz - 8.8 * BASE_MAP_SCALE);
                 arenaScene.add(tank);
             }
         });
     });
 
-    // 3. Ventanales espaciales blindados en muros exteriores
-    const windowCoords = [-48, -24, 0, 24, 48];
+    const windowCoords = [-48, -24, 0, 24, 48].map(v => v * BASE_MAP_SCALE);
+    const outerWinPos = 71.3 * BASE_MAP_SCALE;
     windowCoords.forEach(coord => {
-        [-71.3, 71.3].forEach(zWall => {
+        [-outerWinPos, outerWinPos].forEach(zWall => {
             const frame = new THREE.Mesh(viewportFrameGeo, ribMat);
             frame.position.set(coord, 4.6, zWall);
             arenaScene.add(frame);
@@ -723,7 +735,7 @@ function decorateSpaceshipComplex(mission, sectorCenters, wallH) {
             }
         });
 
-        [-71.3, 71.3].forEach(xWall => {
+        [-outerWinPos, outerWinPos].forEach(xWall => {
             const frame = new THREE.Mesh(viewportFrameGeo, ribMat);
             frame.rotation.y = Math.PI / 2;
             frame.position.set(xWall, 4.6, coord);
@@ -740,7 +752,10 @@ function decorateSpaceshipComplex(mission, sectorCenters, wallH) {
 function buildSpaceshipCorridorComplex(mission) {
     const WALL_H = 11.0;
     const WALL_T = 1.5;
-    const SPAN = 144.0; // 6x6 sectores de 24x24 (-72 a +72)
+    const SPAN = 144.0 * BASE_MAP_SCALE;
+    const HALF_SPAN = 72.0 * BASE_MAP_SCALE;
+    const SECTOR_STEP = 24.0 * BASE_MAP_SCALE;
+    const HALF_SECTOR = 12.0 * BASE_MAP_SCALE;
 
     const floor = new THREE.Mesh(
         new THREE.PlaneGeometry(SPAN + 4, SPAN + 4),
@@ -769,20 +784,17 @@ function buildSpaceshipCorridorComplex(mission) {
     const trimMat = new THREE.MeshBasicMaterial({ color: mission.accentColor });
     const upperTrimMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8 });
 
-    // Muros exteriores blindados (±72)
-    addSolidWallBox(0, -72.0, SPAN + WALL_T, WALL_T, WALL_H, outerWallMat, trimMat, upperTrimMat);
-    addSolidWallBox(0, 72.0, SPAN + WALL_T, WALL_T, WALL_H, outerWallMat, trimMat, upperTrimMat);
-    addSolidWallBox(-72.0, 0, WALL_T, SPAN + WALL_T, WALL_H, outerWallMat, trimMat, upperTrimMat);
-    addSolidWallBox(72.0, 0, WALL_T, SPAN + WALL_T, WALL_H, outerWallMat, trimMat, upperTrimMat);
+    addSolidWallBox(0, -HALF_SPAN, SPAN + WALL_T, WALL_T, WALL_H, outerWallMat, trimMat, upperTrimMat);
+    addSolidWallBox(0, HALF_SPAN, SPAN + WALL_T, WALL_T, WALL_H, outerWallMat, trimMat, upperTrimMat);
+    addSolidWallBox(-HALF_SPAN, 0, WALL_T, SPAN + WALL_T, WALL_H, outerWallMat, trimMat, upperTrimMat);
+    addSolidWallBox(HALF_SPAN, 0, WALL_T, SPAN + WALL_T, WALL_H, outerWallMat, trimMat, upperTrimMat);
 
-    // 6x6 sectores centrados en: -60, -36, -12, 12, 36, 60
-    const sectorCenters = [-60, -36, -12, 12, 36, 60];
-    const doorHalf = 2.6;
+    const sectorCenters = [-60, -36, -12, 12, 36, 60].map(v => v * BASE_MAP_SCALE);
+    const doorHalf = 2.6 * BASE_MAP_SCALE;
 
     const vOpen = {};
     const hOpen = {};
 
-    // Árbol de expansión determinista para conectar los 36 sectores sin habitaciones aisladas
     const visited = Array.from({ length: 6 }, () => Array(6).fill(false));
     function carveMaze(cx, cz) {
         visited[cx][cz] = true;
@@ -807,19 +819,17 @@ function buildSpaceshipCorridorComplex(mission) {
     }
     carveMaze(2, 2);
 
-    // Abrir algunos enlaces estratégicos alrededor del núcleo central (0,0) para fluidez
     vOpen['2_2'] = true;
     hOpen['2_2'] = true;
     vOpen['1_3'] = true;
     hOpen['3_1'] = true;
 
-    // Construir 5 muros internos verticales (-48, -24, 0, 24, 48)
     for (let ix = 0; ix < 5; ix++) {
-        const wallX = -48 + ix * 24;
+        const wallX = (-48 + ix * 24) * BASE_MAP_SCALE;
         for (let iz = 0; iz < 6; iz++) {
             const centerZ = sectorCenters[iz];
-            const segStart = centerZ - 12;
-            const segEnd = centerZ + 12;
+            const segStart = centerZ - HALF_SECTOR;
+            const segEnd = centerZ + HALF_SECTOR;
 
             if (vOpen[`${ix}_${iz}`]) {
                 const leftLen = (centerZ - doorHalf) - segStart;
@@ -835,18 +845,17 @@ function buildSpaceshipCorridorComplex(mission) {
                 glow.position.set(wallX, 4.85, centerZ);
                 arenaScene.add(glow);
             } else {
-                addSolidWallBox(wallX, centerZ, 1.2, 24.0, WALL_H, innerWallMat, trimMat, upperTrimMat);
+                addSolidWallBox(wallX, centerZ, 1.2, SECTOR_STEP, WALL_H, innerWallMat, trimMat, upperTrimMat);
             }
         }
     }
 
-    // Construir 5 muros internos horizontales (-48, -24, 0, 24, 48)
     for (let iz = 0; iz < 5; iz++) {
-        const wallZ = -48 + iz * 24;
+        const wallZ = (-48 + iz * 24) * BASE_MAP_SCALE;
         for (let ix = 0; ix < 6; ix++) {
             const centerX = sectorCenters[ix];
-            const segStart = centerX - 12;
-            const segEnd = centerX + 12;
+            const segStart = centerX - HALF_SECTOR;
+            const segEnd = centerX + HALF_SECTOR;
 
             if (hOpen[`${ix}_${iz}`]) {
                 const leftLen = (centerX - doorHalf) - segStart;
@@ -862,21 +871,20 @@ function buildSpaceshipCorridorComplex(mission) {
                 glow.position.set(centerX, 4.85, wallZ);
                 arenaScene.add(glow);
             } else {
-                addSolidWallBox(centerX, wallZ, 24.0, 1.2, WALL_H, innerWallMat, trimMat, upperTrimMat);
+                addSolidWallBox(centerX, wallZ, SECTOR_STEP, 1.2, WALL_H, innerWallMat, trimMat, upperTrimMat);
             }
         }
     }
 
-    // Convertir sectores intermedios específicos en PASILLOS LARGOS DE NAVE (rompiendo la forma cuadrada)
     const longCorridors = [
-        { cx: -36, cz: -36, axis: 'X' },
-        { cx: 36, cz: -36, axis: 'X' },
-        { cx: -36, cz: 36, axis: 'X' },
-        { cx: 36, cz: 36, axis: 'X' },
-        { cx: -12, cz: -36, axis: 'Z' },
-        { cx: 12, cz: 36, axis: 'Z' },
-        { cx: -36, cz: 12, axis: 'Z' },
-        { cx: 36, cz: -12, axis: 'Z' }
+        { cx: -36 * BASE_MAP_SCALE, cz: -36 * BASE_MAP_SCALE, axis: 'X' },
+        { cx: 36 * BASE_MAP_SCALE, cz: -36 * BASE_MAP_SCALE, axis: 'X' },
+        { cx: -36 * BASE_MAP_SCALE, cz: 36 * BASE_MAP_SCALE, axis: 'X' },
+        { cx: 36 * BASE_MAP_SCALE, cz: 36 * BASE_MAP_SCALE, axis: 'X' },
+        { cx: -12 * BASE_MAP_SCALE, cz: -36 * BASE_MAP_SCALE, axis: 'Z' },
+        { cx: 12 * BASE_MAP_SCALE, cz: 36 * BASE_MAP_SCALE, axis: 'Z' },
+        { cx: -36 * BASE_MAP_SCALE, cz: 12 * BASE_MAP_SCALE, axis: 'Z' },
+        { cx: 36 * BASE_MAP_SCALE, cz: -12 * BASE_MAP_SCALE, axis: 'Z' }
     ];
     longCorridors.forEach(cor => {
         addInteriorCorridorChute(cor.cx, cor.cz, cor.axis, innerWallMat, ribMat, trimMat);
@@ -884,7 +892,6 @@ function buildSpaceshipCorridorComplex(mission) {
 
     decorateSpaceshipComplex(mission, sectorCenters, WALL_H);
 
-    // Letreros superiores de los 36 sectores
     const sectorNames = [
         ['ESCUDOS (NW)', 'ENLACE SATELITAL', 'PUENTE PRINCIPAL (N)', 'GIROSCOPIOS', 'GALERÍA NORTE', 'CRIOGENIA (NE)'],
         ['REFRIGERACIÓN', 'CORREDOR ALFA-1', 'TÚNEL CENTRAL-N', 'CORREDOR BETA-1', 'PASILLO ESTE-N', 'INVERNADERO LED'],
@@ -909,8 +916,11 @@ function buildRoleSpecificTerminals(role) {
     roleTerminals = [];
 
     activeMissionTasks.forEach((task, taskIndex) => {
+        const scaledX = (task.x || 0) * BASE_MAP_SCALE;
+        const scaledZ = (task.z || 0) * BASE_MAP_SCALE;
+
         const group = new THREE.Group();
-        group.position.set(task.x, 0, task.z);
+        group.position.set(scaledX, 0, scaledZ);
         group.rotation.y = task.rotY || 0;
 
         const pedestal = new THREE.Mesh(
@@ -947,7 +957,7 @@ function buildRoleSpecificTerminals(role) {
         group.add(label);
 
         arenaScene.add(group);
-        roleTerminals.push({ ...task, taskIndex, group, screenMat, beacon });
+        roleTerminals.push({ ...task, x: scaledX, z: scaledZ, taskIndex, group, screenMat, beacon });
     });
 }
 
@@ -957,7 +967,7 @@ function drawSectorRadarMinimap() {
     const ctx = canvas.getContext('2d');
     const W = canvas.width;
     const H = canvas.height;
-    const HALF_WORLD = 73.0; // -73 a +73
+    const HALF_WORLD = 73.0 * BASE_MAP_SCALE;
 
     const toCanvasX = wx => ((wx + HALF_WORLD) / (HALF_WORLD * 2)) * W;
     const toCanvasY = wz => ((wz + HALF_WORLD) / (HALF_WORLD * 2)) * H;
@@ -966,17 +976,17 @@ function drawSectorRadarMinimap() {
     ctx.fillStyle = '#050b18';
     ctx.fillRect(0, 0, W, H);
 
-    // Cuadrícula de los 36 sectores
     ctx.strokeStyle = 'rgba(56, 189, 248, 0.14)';
     ctx.lineWidth = 1;
-    for (let g = -48; g <= 48; g += 24) {
+    const gridLimit = 48 * BASE_MAP_SCALE;
+    const gridStep = 24 * BASE_MAP_SCALE;
+    for (let g = -gridLimit; g <= gridLimit + 0.1; g += gridStep) {
         const cx = toCanvasX(g);
         const cy = toCanvasY(g);
         ctx.beginPath(); ctx.moveTo(cx, 0); ctx.lineTo(cx, H); ctx.stroke();
         ctx.beginPath(); ctx.moveTo(0, cy); ctx.lineTo(W, cy); ctx.stroke();
     }
 
-    // Muros y pasillos de la nave
     ctx.fillStyle = '#334155';
     radarWallSegments.forEach(seg => {
         const x1 = toCanvasX(seg.cx - seg.widthX / 2);
@@ -986,7 +996,6 @@ function drawSectorRadarMinimap() {
         ctx.fillRect(x1, y1, rw, rh);
     });
 
-    // Puntos de tareas del rol (Verde = lista, Rojo = bloqueada, Cian/Rol = disponible)
     const myRoleId = GAME_STATE.selectedRole.id;
     roleTerminals.forEach(t => {
         const tx = toCanvasX(t.x);
@@ -1003,7 +1012,6 @@ function drawSectorRadarMinimap() {
         ctx.fill();
     });
 
-    // Compañeros conectados
     Object.values(MP.players).forEach(p => {
         if (p.id === MP.myId) return;
         const px = toCanvasX(p.x || 0);
@@ -1014,7 +1022,6 @@ function drawSectorRadarMinimap() {
         ctx.fill();
     });
 
-    // Posición y dirección de mirada del jugador local
     const meX = toCanvasX(baseAstroRig.group.position.x);
     const meY = toCanvasY(baseAstroRig.group.position.z);
 
@@ -1055,6 +1062,7 @@ function updateBaseCompassHint() {
 
 function resolveBaseWallCollisions(pos) {
     const r = 0.48;
+    const maxBound = 70.8 * BASE_MAP_SCALE;
     for (let i = 0; i < baseColliders.length; i++) {
         const box = baseColliders[i];
         if (pos.x + r > box.minX && pos.x - r < box.maxX && pos.z + r > box.minZ && pos.z - r < box.maxZ) {
@@ -1070,14 +1078,15 @@ function resolveBaseWallCollisions(pos) {
             else if (minOverlap === overlapBottom) pos.z = box.maxZ + r;
         }
     }
-    pos.x = Math.max(-70.8, Math.min(70.8, pos.x));
-    pos.z = Math.max(-70.8, Math.min(70.8, pos.z));
+    pos.x = Math.max(-maxBound, Math.min(maxBound, pos.x));
+    pos.z = Math.max(-maxBound, Math.min(maxBound, pos.z));
 }
 
 function clampBaseCameraInsideWalls(camPos, targetPos) {
-    camPos.y = Math.min(9.2, Math.max(1.8, camPos.y));
-    camPos.x = Math.max(-70.6, Math.min(70.6, camPos.x));
-    camPos.z = Math.max(-70.6, Math.min(70.6, camPos.z));
+    const camBound = 70.6 * BASE_MAP_SCALE;
+    camPos.y = Math.min(9.6, Math.max(0.65, camPos.y));
+    camPos.x = Math.max(-camBound, Math.min(camBound, camPos.x));
+    camPos.z = Math.max(-camBound, Math.min(camBound, camPos.z));
 
     const steps = 8;
     for (let s = 1; s <= steps; s++) {
@@ -1097,7 +1106,7 @@ function clampBaseCameraInsideWalls(camPos, targetPos) {
 }
 
 function syncBaseRemoteAstronauts(elapsed, dt) {
-    MP.updateBots(dt, 62);
+    MP.updateBots(dt, 62 * BASE_MAP_SCALE);
 
     if (MP.isHost) {
         botTaskTimer += dt;
@@ -1116,7 +1125,9 @@ function syncBaseRemoteAstronauts(elapsed, dt) {
         }
     }
 
+    const smoothFactor = Math.min(1, 1 - Math.exp(-12 * dt));
     const activeIds = new Set();
+
     Object.values(MP.players).forEach(p => {
         if (p.id === MP.myId) return;
         activeIds.add(p.id);
@@ -1138,10 +1149,13 @@ function syncBaseRemoteAstronauts(elapsed, dt) {
         }
 
         const rig = remoteBaseAstros[p.id].rig;
-        rig.group.position.x += (p.x - rig.group.position.x) * 0.2;
-        rig.group.position.y += ((p.y || 0) - rig.group.position.y) * 0.25;
-        rig.group.position.z += (p.z - rig.group.position.z) * 0.2;
-        rig.group.rotation.y = p.rotY || 0;
+        rig.group.position.x += ((p.x || 0) - rig.group.position.x) * smoothFactor;
+        rig.group.position.y += ((p.y || 0) - rig.group.position.y) * smoothFactor;
+        rig.group.position.z += ((p.z || 0) - rig.group.position.z) * smoothFactor;
+
+        const targetRot = p.rotY || 0;
+        const diffRot = Math.atan2(Math.sin(targetRot - rig.group.rotation.y), Math.cos(targetRot - rig.group.rotation.y));
+        rig.group.rotation.y += diffRot * smoothFactor;
 
         if (rig.propellerMesh) rig.propellerMesh.rotation.y += 0.25;
 
@@ -1300,10 +1314,12 @@ function animatePlanetaryBase(now) {
 
         const camDist = 6.2;
         const targetPos = new THREE.Vector3(baseAstroRig.group.position.x, baseAstroRig.group.position.y + 1.8, baseAstroRig.group.position.z);
+        const horizDist = camDist * Math.cos(baseCamPitch);
+        const vertOffset = camDist * Math.sin(baseCamPitch);
         const desiredCam = new THREE.Vector3(
-            baseAstroRig.group.position.x + Math.sin(baseCamYaw) * camDist,
-            baseAstroRig.group.position.y + 3.8,
-            baseAstroRig.group.position.z + Math.cos(baseCamYaw) * camDist
+            targetPos.x + Math.sin(baseCamYaw) * horizDist,
+            targetPos.y + vertOffset,
+            targetPos.z + Math.cos(baseCamYaw) * horizDist
         );
         clampBaseCameraInsideWalls(desiredCam, targetPos);
         arenaCamera.position.copy(desiredCam);
@@ -1378,7 +1394,6 @@ function openTaskMinigame(task) {
 }
 
 function renderNasaQuestionStep(body, task, onFinalComplete) {
-    // Mezclar el orden de las opciones en cada terminal manteniendo rastreada la respuesta correcta
     const mappedOptions = task.nasaOptions.map((text, idx) => ({
         text,
         isCorrect: idx === task.correctIdx
