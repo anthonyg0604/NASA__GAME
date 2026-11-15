@@ -12,13 +12,14 @@ let isDragging = false;
 let prevMouseX = 0;
 let ccLastTime = 0;
 
-// Variables para el Taller Modular Completo estilo GTA en Ingeniería
-let garageTab = 'primaryColors';
+// Taller por partes de la nave en Ingeniería
+let garageTab = 'noses';
 let garageFeedbackMsg = '';
 let previewScene, previewCamera, previewRenderer, previewRocket, previewAnimId;
 let previewRotY = 0.6;
 let previewDragging = false;
 let previewPrevX = 0;
+let previewLastTime = 0;
 
 function initControlCenter() {
     const container = document.getElementById('webgl-canvas-container');
@@ -72,7 +73,7 @@ function rebuildControlCenterAstronaut(pos) {
     const char = GAME_DATA.characters.find(c => c.id === GAME_STATE.selectedCharacterId) || GAME_DATA.characters[0];
     astroRig = createBackyardiganCharacter(char.id, {
         name: MP.myName,
-        charName: char.name.split(' ')[0],
+        charName: char.shortName,
         roleShort: role.short,
         colorCss: role.colorCss
     });
@@ -88,22 +89,22 @@ function syncAllRemoteAstronauts(time, dt) {
         if (p.id === MP.myId) return;
         activeIds.add(p.id);
 
-        const charId = p.characterId || 'uniqua';
-        if (!remoteCCAstros[p.id] || remoteCCAstros[p.id].charId !== charId) {
+        const charId = p.characterId || 'pablo';
+        if (!remoteCCAstros[p.id] || remoteCCAstros[p.id].charId !== charId || remoteCCAstros[p.id].name !== p.name) {
             if (remoteCCAstros[p.id]) {
                 ccScene.remove(remoteCCAstros[p.id].rig.group);
             }
             const role = GAME_DATA.roles.find(r => r.id === p.roleId) || GAME_DATA.roles[0];
-            const char = GAME_DATA.characters.find(c => c.id === charId) || GAME_DATA.characters[1];
+            const char = GAME_DATA.characters.find(c => c.id === charId) || GAME_DATA.characters[0];
             const rig = createBackyardiganCharacter(charId, {
                 name: p.name,
-                charName: char.name.split(' ')[0],
+                charName: char.shortName,
                 roleShort: role.short,
                 colorCss: role.colorCss
             });
             rig.group.position.set(p.x || 0, p.y || 0, p.z || 3);
             ccScene.add(rig.group);
-            remoteCCAstros[p.id] = { rig, charId };
+            remoteCCAstros[p.id] = { rig, charId, name: p.name };
         }
 
         const rig = remoteCCAstros[p.id].rig;
@@ -253,7 +254,7 @@ function buildStations() {
     stations = [];
     const stationConfigs = [
         { id: 'planning', num: '01', title: 'PLANIFICACIÓN', sub: 'DESTINO Y PLANETA', x: 5.5, z: 1.5, rotY: -0.35, color: '#38bdf8', hex: 0x38bdf8 },
-        { id: 'engineering', num: '02', title: 'INGENIERÍA', sub: 'CUSTOMIZAR NAVE (8 PIEZAS)', x: -5.5, z: 1.5, rotY: 0.35, color: '#10b981', hex: 0x10b981 },
+        { id: 'engineering', num: '02', title: 'INGENIERÍA', sub: 'PARTES DE LA NAVE', x: -5.5, z: 1.5, rotY: 0.35, color: '#10b981', hex: 0x10b981 },
         { id: 'launch', num: '03', title: 'LANZAMIENTO', sub: 'DESPEGUE A ÓRBITA', x: 4.5, z: -5.5, rotY: -0.25, color: '#f59e0b', hex: 0xf59e0b },
         { id: 'operations', num: '04', title: 'OPERACIONES', sub: 'SIMULADOR DIRECTO', x: -4.5, z: -5.5, rotY: 0.25, color: '#a855f7', hex: 0xa855f7 }
     ];
@@ -337,7 +338,6 @@ function setupControlCenterEvents(container) {
         const key = e.key.toLowerCase();
         ccKeys[key] = true;
 
-        // Salto con Barra Espaciadora
         if (e.code === 'Space' && !isModalOpen) {
             e.preventDefault();
             if (astroGrounded) {
@@ -426,7 +426,6 @@ function updateAstronautAndCamera(time, dt) {
         astronaut.position.z = Math.max(-8.5, Math.min(9.5, astronaut.position.z));
     }
 
-    // Física vertical de salto
     astronaut.position.y += astroVelY;
     if (!astroGrounded) {
         astroVelY -= 0.011;
@@ -496,7 +495,7 @@ function openStationModal(station) {
 
     if (station.id === 'planning') {
         body.innerHTML = `
-            <p style="color:#94a3b8; margin-bottom:12px;">Elige el destino planetario de tu expedición (cada misión otorga <strong>Créditos Galácticos</strong> al completarla):</p>
+            <p style="color:#94a3b8; margin-bottom:12px;">Elige el destino planetario de tu expedición (cada misión otorga <strong>Créditos Galácticos</strong> al regresar a la Tierra):</p>
             <div class="option-grid">
                 ${GAME_DATA.missions.map(m => `
                     <div class="option-card ${GAME_STATE.selectedMission.id === m.id ? 'selected' : ''}" onclick="selectMission('${m.id}')">
@@ -519,9 +518,9 @@ function openStationModal(station) {
             <div style="text-align:center; padding: 10px 0;">
                 <p style="font-size:1.05rem; margin-bottom:8px;">Destino: <strong style="color:#38bdf8;">${GAME_STATE.selectedMission.name}</strong> (<span style="color:#fbbf24;">+${GAME_STATE.selectedMission.rewardCredits} CR</span>)</p>
                 <p style="color:#94a3b8; margin-bottom:8px;">Rol activo: <strong style="color:${GAME_STATE.selectedRole.colorCss};">${GAME_STATE.selectedRole.name}</strong></p>
-                <p style="color:#94a3b8; margin-bottom:16px;">Piezas instaladas: <strong>${sc.hull.name}</strong> • <strong>${sc.cockpit.name}</strong> • <strong>${sc.booster.name}</strong> • <strong>${sc.wing.name}</strong></p>
+                <p style="color:#94a3b8; margin-bottom:16px;">Nave equipada: <strong>${sc.nose.name}</strong> • <strong>${sc.wing.name}</strong> • <strong>${sc.booster.name}</strong></p>
                 <p style="background:rgba(56,189,248,0.14); border:1px solid #38bdf8; padding:12px; border-radius:10px; font-size:0.9rem; margin-bottom:18px;">
-                    🧭 <strong>Misión:</strong> Pilota tu nave personalizada esquivando meteoritos. Al aterrizar en la base del planeta, completa las <strong>3 pantallas iluminadas de tu rol</strong> y vuelve al centro verde para cobrar tu recompensa.
+                    🧭 <strong>Misión completa:</strong> Viaja al planeta, completa las <strong>3 operaciones de tu rol</strong> dentro de la base, vuelve al aro verde central y pilota tu nave de <strong>regreso a la Tierra</strong> para cobrar tus créditos.
                 </p>
                 <button class="btn-primary" onclick="beginMissionLaunch(false)">🔥 INICIAR DESPEGUE AHORA</button>
             </div>
@@ -531,29 +530,27 @@ function openStationModal(station) {
     modal.classList.remove('hidden');
 }
 
-// Renderiza el Taller Modular Completo (8 categorías de piezas + personajes)
+// Taller de Modificación por Partes (Pico, Alas, Motor y Humo, Fuselaje, Pintura)
 function renderGarageContent() {
     const body = document.getElementById('modal-body');
     const title = document.getElementById('modal-title');
-    title.innerHTML = `02 • TALLER MODULAR DE NAVE <span style="float:right; color:#fbbf24; font-size:1rem;">💰 ${GAME_STATE.credits} CR</span>`;
+    title.innerHTML = `02 • TALLER DE PARTES DE LA NAVE <span style="float:right; color:#fbbf24; font-size:1rem;">💰 ${GAME_STATE.credits} CR</span>`;
 
     const tabs = [
-        { id: 'primaryColors', label: '🎨 Color 1' },
-        { id: 'secondaryColors', label: '🖌️ Color 2' },
-        { id: 'hulls', label: '🚀 Fuselaje' },
-        { id: 'cockpits', label: '🪟 Cabina' },
-        { id: 'noses', label: '🛡️ Morro' },
+        { id: 'noses', label: '🔺 Pico / Morro' },
         { id: 'wings', label: '🛸 Alas' },
-        { id: 'boosters', label: '🔥 Motores' },
-        { id: 'addons', label: '📡 Extras' },
+        { id: 'boosters', label: '🔥 Motor y Humo' },
+        { id: 'hulls', label: '🚀 Fuselaje' },
+        { id: 'primaryColors', label: '🎨 Pintura' },
+        { id: 'secondaryColors', label: '🖌️ Detalles' },
         { id: 'crew', label: '🐾 Personaje/Rol' }
     ];
 
     const sc = GAME_STATE.shipConfig;
     const stats = GAME_STATE.getShipTotalStats();
     const speedPct = Math.min(100, Math.round(((stats.speedMult - 0.8) / 1.0) * 100));
-    const shieldPct = Math.min(100, Math.round(((100 + stats.shieldBonus) / 260) * 100));
-    const o2Pct = Math.min(100, Math.round(((130 + stats.o2Bonus) / 300) * 100));
+    const shieldPct = Math.min(100, Math.round(((100 + stats.shieldBonus) / 240) * 100));
+    const o2Pct = Math.min(100, Math.round(((130 + stats.o2Bonus) / 280) * 100));
 
     let itemsHtml = '';
     if (garageTab === 'crew') {
@@ -586,14 +583,12 @@ function renderGarageContent() {
     } else {
         const list = GAME_DATA.shipCustomization[garageTab];
         const keyMap = {
-            primaryColors: 'primaryColor',
-            secondaryColors: 'secondaryColor',
-            hulls: 'hull',
-            cockpits: 'cockpit',
             noses: 'nose',
             wings: 'wing',
             boosters: 'booster',
-            addons: 'addon'
+            hulls: 'hull',
+            primaryColors: 'primaryColor',
+            secondaryColors: 'secondaryColor'
         };
         const equippedId = sc[keyMap[garageTab]].id;
 
@@ -605,11 +600,11 @@ function renderGarageContent() {
                     const swatchHtml = item.css ? `<span class="color-swatch" style="background:${item.css};"></span>` : '';
                     let badgeHtml = '';
                     if (isEquipped) {
-                        badgeHtml = `<span class="price-badge equipped">✓ EQUIPADO</span>`;
+                        badgeHtml = `<span class="price-badge equipped">✓ EQUIPADO EN NAVE</span>`;
                     } else if (isUnlocked) {
                         badgeHtml = `<span class="price-badge unlocked">DESBLOQUEADO (Instalar)</span>`;
                     } else {
-                        badgeHtml = `<span class="price-badge locked">🔒 ${item.price} CR — Comprar</span>`;
+                        badgeHtml = `<span class="price-badge locked">🔒 ${item.price} CR — Desbloquear</span>`;
                     }
                     return `
                         <div class="option-card ${isEquipped ? 'selected' : ''}" onclick="handleGarageItemClick('${garageTab}', '${item.id}')">
@@ -627,12 +622,13 @@ function renderGarageContent() {
         <div class="garage-layout">
             <div class="garage-left">
                 <div id="ship-preview-canvas"></div>
-                <p style="font-size:0.74rem; color:#94a3b8; margin-bottom:8px;">Arrastra con el ratón para girar la nave 3D</p>
+                <p style="font-size:0.74rem; color:#94a3b8; margin-bottom:8px;">Arrastra con el ratón para girar tu nave 3D</p>
                 <div class="equipped-summary">
-                    <strong>Configuración actual:</strong><br>
-                    • Casco: ${sc.hull.name} | Cabina: ${sc.cockpit.name}<br>
-                    • Morro: ${sc.nose.name} | Alas: ${sc.wing.name}<br>
-                    • Motor: ${sc.booster.name} | Extra: ${sc.addon.name}
+                    <strong>Partes instaladas actualmente:</strong><br>
+                    • <strong>Pico:</strong> ${sc.nose.name}<br>
+                    • <strong>Alas:</strong> ${sc.wing.name}<br>
+                    • <strong>Motor/Humo:</strong> ${sc.booster.name}<br>
+                    • <strong>Fuselaje:</strong> ${sc.hull.name}
                 </div>
                 <div class="garage-stats">
                     <div class="stat-row">
@@ -676,20 +672,18 @@ function handleGarageItemClick(category, itemId) {
     if (!item) return;
 
     const keyMap = {
-        primaryColors: 'primaryColor',
-        secondaryColors: 'secondaryColor',
-        hulls: 'hull',
-        cockpits: 'cockpit',
         noses: 'nose',
         wings: 'wing',
         boosters: 'booster',
-        addons: 'addon'
+        hulls: 'hull',
+        primaryColors: 'primaryColor',
+        secondaryColors: 'secondaryColor'
     };
     const isUnlocked = GAME_STATE.unlockedParts.includes(item.id);
 
     if (isUnlocked) {
         GAME_STATE.shipConfig[keyMap[category]] = item;
-        garageFeedbackMsg = `✓ Pieza instalada: ${item.name}`;
+        garageFeedbackMsg = `✓ Pieza equipada: ${item.name}`;
         GAME_STATE.saveProgress();
         renderGarageContent();
     } else {
@@ -697,20 +691,26 @@ function handleGarageItemClick(category, itemId) {
             GAME_STATE.credits -= item.price;
             GAME_STATE.unlockedParts.push(item.id);
             GAME_STATE.shipConfig[keyMap[category]] = item;
-            garageFeedbackMsg = `🎉 ¡Pieza comprada e instalada: ${item.name} (-${item.price} CR)!`;
+            garageFeedbackMsg = `🎉 ¡Pieza comprada y equipada: ${item.name} (-${item.price} CR)!`;
             GAME_STATE.saveProgress();
             updateCreditsHUD();
             renderGarageContent();
         } else {
-            garageFeedbackMsg = `⚠️ Créditos insuficientes (${item.price} CR). ¡Completa misiones en los planetas para ganar más!`;
+            garageFeedbackMsg = `⚠️ Créditos insuficientes (${item.price} CR). ¡Completa una misión y regresa a la Tierra para ganar más!`;
             renderGarageContent();
         }
     }
 }
 
 function selectCharacterInGarage(charId) {
-    GAME_STATE.selectedCharacterId = charId;
+    const charObj = GAME_DATA.characters.find(c => c.id === charId) || GAME_DATA.characters[0];
+    GAME_STATE.selectedCharacterId = charObj.id;
     GAME_STATE.saveProgress();
+
+    const nameInput = document.getElementById('player-name-input');
+    if (nameInput) nameInput.value = charObj.shortName;
+    MP.myName = charObj.shortName;
+
     MP.syncLocalPlayerEntry();
     MP.renderPlayersList();
     MP.broadcastRoomState();
@@ -725,7 +725,7 @@ function initShipPreview3D() {
 
     previewScene = new THREE.Scene();
     previewCamera = new THREE.PerspectiveCamera(45, box.clientWidth / box.clientHeight, 0.1, 50);
-    previewCamera.position.set(0, 0.4, 6.2);
+    previewCamera.position.set(0, 0.2, 6.4);
 
     previewRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     previewRenderer.setSize(box.clientWidth, box.clientHeight);
@@ -737,7 +737,8 @@ function initShipPreview3D() {
     previewScene.add(dirLight);
 
     previewRocket = buildCustom3DRocket(true);
-    previewRocket.scale.setScalar(0.84);
+    previewRocket.scale.setScalar(0.8);
+    previewRocket.position.y = 0.25;
     previewRocket.rotation.y = previewRotY;
     previewScene.add(previewRocket);
 
@@ -748,16 +749,19 @@ function initShipPreview3D() {
     window.addEventListener('mouseup', stopPreviewDrag);
     window.addEventListener('mousemove', movePreviewDrag);
 
+    previewLastTime = performance.now();
     function animatePreview() {
         previewAnimId = requestAnimationFrame(animatePreview);
+        const now = performance.now();
+        const dt = Math.min(0.05, (now - previewLastTime) / 1000);
+        previewLastTime = now;
+
         if (!previewDragging && previewRocket) {
             previewRotY += 0.012;
         }
         if (previewRocket) {
             previewRocket.rotation.y = previewRotY;
-            if (previewRocket.userData.flames) {
-                previewRocket.userData.flames.forEach(f => { f.scale.y = 0.85 + Math.random() * 0.4; });
-            }
+            animateRocketExhaust(previewRocket, dt);
         }
         previewRenderer.render(previewScene, previewCamera);
     }
