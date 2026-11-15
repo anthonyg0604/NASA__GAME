@@ -1,3 +1,5 @@
+const PREFIJO_SALA = 'misionespacial-';
+
 function getPersistentClientId() {
     try {
         let id = sessionStorage.getItem('cubo_phora_pid');
@@ -62,6 +64,8 @@ const MP = {
     lastHeartbeatTime: 0,
     lastPruneTime: 0,
     lastPeekedCode: '',
+    hostSyncInterval: null,
+    voluntaryLeave: false,
 
     initLobbyUI() {
         const initChar = GAME_DATA.characters.find(c => c.id === GAME_STATE.selectedCharacterId) || GAME_DATA.characters[0];
@@ -110,23 +114,11 @@ const MP = {
         };
 
         document.getElementById('tab-create-btn').onclick = () => {
-            this.isHost = true;
-            this.takenRolesByOthers = {};
-            this.lastPeekedCode = '';
-            this.setCountButtonsLocked(false);
-            document.getElementById('tab-create-btn').classList.add('active');
-            document.getElementById('tab-join-btn').classList.remove('active');
-            document.getElementById('panel-create-room').classList.remove('hidden');
-            document.getElementById('panel-join-room').classList.add('hidden');
-            this.players = {};
-            this.syncLocalPlayerEntry();
-            this.rebuildBotSlots();
-            this.renderLobbyRoles();
-            this.renderPlayersList();
-            this.setupHostPeer();
+            this.switchToCreateRoomTab(false);
         };
 
         document.getElementById('tab-join-btn').onclick = () => {
+            this.stopHostSyncLoop();
             this.isHost = false;
             this.takenRolesByOthers = {};
             this.lastPeekedCode = '';
@@ -205,6 +197,84 @@ const MP = {
         window.addEventListener('pagehide', notifyUnload);
     },
 
+    switchToCreateRoomTab(generateNewCode) {
+        this.isHost = true;
+        this.takenRolesByOthers = {};
+        this.lastPeekedCode = '';
+        if (generateNewCode) {
+            this.roomCode = String(Math.floor(1000 + Math.random() * 9000));
+            const codeEl = document.getElementById('generated-room-code');
+            if (codeEl) codeEl.innerText = this.roomCode;
+        }
+        this.setCountButtonsLocked(false);
+        document.getElementById('tab-create-btn').classList.add('active');
+        document.getElementById('tab-join-btn').classList.remove('active');
+        document.getElementById('panel-create-room').classList.remove('hidden');
+        document.getElementById('panel-join-room').classList.add('hidden');
+        this.players = {};
+        this.syncLocalPlayerEntry();
+        this.rebuildBotSlots();
+        this.renderLobbyRoles();
+        this.renderPlayersList();
+        this.setupHostPeer();
+    },
+
+    // Botón "Volver" desde la nave para desconectarse y crear/unirse a otra sala
+    leaveCurrentRoom(isHostDisconnect = false) {
+        this.voluntaryLeave = true;
+        this.stopHostSyncLoop();
+
+        const leaveMsg = { type: 'PLAYER_LEAVE', id: this.myId, name: this.myName };
+        try {
+            if (!this.isHost && this.hostConn && this.hostConn.open) {
+                this.hostConn.send(leaveMsg);
+            }
+            this.guestConns.forEach(c => {
+                try { c.close(); } catch (_) {}
+            });
+            if (this.hostConn) {
+                try { this.hostConn.close(); } catch (_) {}
+            }
+            if (this.peer && !this.peer.destroyed) {
+                this.peer.destroy();
+            }
+        } catch (_) {}
+
+        this.guestConns = [];
+        this.hostConn = null;
+        this.peer = null;
+        this.completedTasksByRole = {};
+
+        const joinBtn = document.getElementById('connect-room-btn');
+        if (joinBtn) {
+            joinBtn.disabled = false;
+            joinBtn.innerText = '🔗 INGRESAR A LA SALA';
+        }
+        const joinInput = document.getElementById('join-code-input');
+        if (joinInput) joinInput.value = '';
+        const joinFb = document.getElementById('join-feedback');
+        if (joinFb) joinFb.innerText = '';
+
+        this.switchToCreateRoomTab(true);
+        this.updateHudBadge();
+
+        if (typeof resetAllInputStates === 'function') resetAllInputStates();
+        if (typeof unlockGamePointer === 'function') unlockGamePointer();
+
+        const consoleModal = document.getElementById('console-modal');
+        if (consoleModal) consoleModal.classList.add('hidden');
+        const lobbyModal = document.getElementById('lobby-modal');
+        if (lobbyModal) lobbyModal.classList.remove('hidden');
+
+        setTimeout(() => {
+            this.voluntaryLeave = false;
+        }, 300);
+
+        if (isHostDisconnect) {
+            this.showNetworkToast('⚠️ El anfitrión cerró la sala. Has vuelto al menú principal.');
+        }
+    },
+
     setCountButtonsLocked(locked) {
         const btns = document.querySelectorAll('.count-btn');
         btns.forEach(btn => {
@@ -260,6 +330,7 @@ const MP = {
         }, 4200);
     },
 
+    // Si alguien se desconecta, su rol lo toma un bot
     handlePlayerRemoved(playerId, customReason) {
         const departing = this.players[playerId];
         if (!departing) return;
@@ -269,13 +340,33 @@ const MP = {
         const displayName = departing.name || 'Jugador';
 
         delete this.players[playerId];
+
+        if (this.isHost && !departing.isBot) {
+            const char = GAME_DATA.characters.find(c => c.id === departing.characterId) || GAME_DATA.characters[0];
+            const replacementBotId = 'bot_sub_' + Date.now().toString(36).slice(-4);
+            this.players[replacementBotId] = {
+                id: replacementBotId,
+                name: `${char.shortName} (IA)`,
+                characterId: departing.characterId || char.id,
+                roleId: departing.roleId,
+                isBot: true,
+                x: departing.x || 0,
+                y: 0,
+                z: departing.z || 2.5,
+                rotY: departing.rotY || 0,
+                moving: false,
+                targetX: departing.x || 0,
+                targetZ: departing.z || 2.5,
+                waitTimer: 1.5
+            };
+        }
+
         this.refreshTakenRolesFromPlayers();
-        this.rebuildBotSlots();
         this.renderLobbyRoles();
         this.renderPlayersList();
 
         this.showNetworkToast(
-            customReason || `⚠️ ${displayName} (${roleLabel}) salió de la partida. Misiones actualizadas.`
+            customReason || `⚠️ ${displayName} (${roleLabel}) se desconectó. Su rol lo tomó un bot IA.`
         );
 
         if (typeof onRemoteTaskStateUpdated === 'function') {
@@ -283,6 +374,41 @@ const MP = {
         }
         if (this.isHost) {
             this.broadcastRoomState();
+        }
+    },
+
+    // El anfitrión es el cerebro: envía el estado de la partida ~10 veces por segundo (100ms)
+    startHostSyncLoop() {
+        this.stopHostSyncLoop();
+        this.hostSyncInterval = setInterval(() => {
+            if (!this.isHost) return;
+            const activeConns = this.guestConns.filter(c => c && c.open);
+            if (activeConns.length === 0) return;
+
+            const worldPayload = {
+                type: 'WORLD_STATE',
+                maxPlayers: this.maxPlayers,
+                players: this.players,
+                missionId: GAME_STATE.selectedMission.id,
+                completedTasksByRole: this.completedTasksByRole,
+                credits: GAME_STATE.credits,
+                arenaState: {
+                    phase: typeof arenaPhase !== 'undefined' ? arenaPhase : 'flight_out',
+                    oxygen: typeof suitOxygen !== 'undefined' ? suitOxygen : 110,
+                    shield: typeof shipShield !== 'undefined' ? shipShield : 100
+                }
+            };
+
+            activeConns.forEach(c => {
+                try { c.send(worldPayload); } catch (_) {}
+            });
+        }, 100);
+    },
+
+    stopHostSyncLoop() {
+        if (this.hostSyncInterval) {
+            clearInterval(this.hostSyncInterval);
+            this.hostSyncInterval = null;
         }
     },
 
@@ -315,11 +441,11 @@ const MP = {
             }
         }
 
-        if (now - this.lastPruneTime >= 1000) {
+        if (this.isHost && now - this.lastPruneTime >= 1200) {
             this.lastPruneTime = now;
             Object.values(this.players).forEach(p => {
                 if (p.id === this.myId || p.isBot) return;
-                if (p.lastSeen && (now - p.lastSeen > 4500)) {
+                if (p.lastSeen && (now - p.lastSeen > 5500)) {
                     this.handlePlayerRemoved(p.id);
                 }
             });
@@ -378,11 +504,11 @@ const MP = {
         if (!grid) return;
         grid.innerHTML = GAME_DATA.characters.map(c => `
             <div class="char-card ${GAME_STATE.selectedCharacterId === c.id ? 'selected' : ''}" data-char="${c.id}">
-                <div style="display:flex; align-items:center; gap:10px;">
+                <div style="display:flex; align-items:center; gap:8px;">
                     <span class="color-swatch" style="background:${c.colorCss};"></span>
                     <div>
-                        <strong style="font-size:0.86rem; display:block;">${c.name}</strong>
-                        <span style="font-size:0.72rem; color:#94a3b8;">${c.species}</span>
+                        <strong style="font-size:0.84rem; display:block;">${c.shortName}</strong>
+                        <span style="font-size:0.70rem; color:#94a3b8;">${c.species}</span>
                     </div>
                 </div>
             </div>
@@ -492,9 +618,9 @@ const MP = {
         const freeRoles = GAME_DATA.roles.filter(r => !usedRoles.has(r.id));
 
         const spawnSpots = [
-            { x: -2.6, z: 2.8 },
-            { x: 2.6, z: 2.8 },
-            { x: -1.8, z: 1.0 }
+            { x: -3.2, z: 3.2 },
+            { x: 3.2, z: 3.2 },
+            { x: -2.2, z: 1.2 }
         ];
 
         for (let i = 0; i < neededBots; i++) {
@@ -539,22 +665,26 @@ const MP = {
 
     updateHudBadge() {
         const count = Object.keys(this.players).length;
-        document.getElementById('hud-room-code').innerText = this.roomCode;
-        document.getElementById('hud-player-count').innerText = `${count}/${this.maxPlayers}`;
+        const codeEl = document.getElementById('hud-room-code');
+        const countEl = document.getElementById('hud-player-count');
+        if (codeEl) codeEl.innerText = this.roomCode;
+        if (countEl) countEl.innerText = `${count}/${this.maxPlayers}`;
     },
 
     setupHostPeer() {
         if (typeof Peer === 'undefined') return;
+        this.stopHostSyncLoop();
         if (this.peer) {
             try { this.peer.destroy(); } catch (_) {}
         }
         const badge = document.getElementById('net-status-badge');
-        badge.innerText = '● Registrando sala en red global...';
+        if (badge) badge.innerText = '● Registrando sala en servidor PeerJS...';
 
         try {
-            this.peer = new Peer('nasa-cubo-phora-' + this.roomCode, PEER_ICE_CONFIG);
+            this.peer = new Peer(PREFIJO_SALA + this.roomCode, PEER_ICE_CONFIG);
             this.peer.on('open', () => {
-                badge.innerText = `● Sala Online #${this.roomCode} (Anfitrión Global)`;
+                if (badge) badge.innerText = `● Sala Online #${this.roomCode} (Anfitrión WebRTC)`;
+                this.startHostSyncLoop();
             });
             this.peer.on('connection', conn => {
                 this.guestConns = this.guestConns.filter(c => c.open);
@@ -575,8 +705,8 @@ const MP = {
                     this.roomCode = String(Math.floor(1000 + Math.random() * 9000));
                     document.getElementById('generated-room-code').innerText = this.roomCode;
                     this.setupHostPeer();
-                } else {
-                    badge.innerText = '● Reintentando enlace global...';
+                } else if (badge) {
+                    badge.innerText = '● Reintentando enlace PeerJS...';
                 }
             });
         } catch (_) {}
@@ -615,6 +745,10 @@ const MP = {
                 return;
             }
 
+            // Si había un bot ocupando un rol, liberamos un bot para dar paso al jugador humano
+            const botKey = Object.keys(this.players).find(k => this.players[k].isBot);
+            if (botKey) delete this.players[botKey];
+
             const usedHumanRoles = new Set(existingHumans.map(p => p.roleId));
             let finalRoleId = data.player.roleId;
             if (usedHumanRoles.has(finalRoleId)) {
@@ -650,9 +784,6 @@ const MP = {
                 Object.assign(this.players[data.id], data.pos, { lastSeen: performance.now() });
                 this.refreshTakenRolesFromPlayers();
             }
-            this.guestConns.forEach(c => {
-                if (c !== conn && c.open) c.send(data);
-            });
 
         } else if (data.type === 'PLAYER_LEAVE') {
             this.guestConns = this.guestConns.filter(c => c !== conn);
@@ -678,7 +809,7 @@ const MP = {
         const cleanup = () => { try { tempPeer.destroy(); } catch (_) {} };
 
         tempPeer.on('open', () => {
-            const conn = tempPeer.connect('nasa-cubo-phora-' + code, { reliable: true, serialization: 'json' });
+            const conn = tempPeer.connect(PREFIJO_SALA + code, { reliable: true, serialization: 'json' });
             conn.on('open', () => {
                 conn.send({ type: 'PEEK_ROOM', requesterId: this.myId });
             });
@@ -695,9 +826,45 @@ const MP = {
         });
         tempPeer.on('error', () => {
             feedback.style.color = '#fbbf24';
-            feedback.innerText = `⚠️ Buscando sala #${code}... Pulsa INGRESAR A LA SALA para forzar enlace.`;
+            feedback.innerText = `⚠️ Buscando sala #${code}... Pulsa INGRESAR A LA SALA para conectar.`;
             cleanup();
         });
+    },
+
+    applySyncedPlayersFromHost(nextPlayers) {
+        const myLocal = this.players[this.myId];
+        const prevIds = Object.keys(this.players);
+        const now = performance.now();
+
+        Object.values(nextPlayers).forEach(np => {
+            np.lastSeen = now;
+        });
+
+        prevIds.forEach(oldId => {
+            if (oldId !== this.myId && !nextPlayers[oldId] && this.players[oldId] && !this.players[oldId].isBot) {
+                const gone = this.players[oldId];
+                const rObj = GAME_DATA.roles.find(r => r.id === gone.roleId);
+                this.showNetworkToast(`⚠️ ${gone.name} (${rObj ? rObj.short : 'Tripulante'}) salió. Su rol lo tomó un bot IA.`);
+            }
+        });
+
+        this.players = nextPlayers;
+
+        if (this.players[this.myId] && this.players[this.myId].roleId) {
+            const assignedRole = GAME_DATA.roles.find(r => r.id === this.players[this.myId].roleId);
+            if (assignedRole && assignedRole.id !== GAME_STATE.selectedRole.id) {
+                GAME_STATE.selectedRole = assignedRole;
+                if (typeof updateTopMissionBadge === 'function') updateTopMissionBadge();
+            }
+        }
+
+        if (myLocal && this.players[this.myId]) {
+            this.players[this.myId].x = myLocal.x;
+            this.players[this.myId].y = myLocal.y;
+            this.players[this.myId].z = myLocal.z;
+            this.players[this.myId].rotY = myLocal.rotY;
+            this.players[this.myId].moving = myLocal.moving;
+        }
     },
 
     joinRemoteRoom(code) {
@@ -706,14 +873,15 @@ const MP = {
 
         if (typeof Peer === 'undefined') {
             feedback.style.color = '#ef4444';
-            feedback.innerText = '❌ Error cargando red. Recarga con Ctrl + Shift + R.';
+            feedback.innerText = '❌ Error cargando PeerJS. Recarga con Ctrl + Shift + R.';
             return;
         }
 
+        this.stopHostSyncLoop();
         btn.disabled = true;
         btn.innerText = '⏳ ENLAZANDO RED...';
         feedback.style.color = '#38bdf8';
-        feedback.innerText = `⏳ Conectando por red global (STUN/TURN) a sala #${code}...`;
+        feedback.innerText = `⏳ Conectando por WebRTC (PeerJS) a sala #${code}...`;
 
         if (this.peer) {
             try { this.peer.destroy(); } catch (_) {}
@@ -725,7 +893,7 @@ const MP = {
                 btn.disabled = false;
                 btn.innerText = '🔗 INGRESAR A LA SALA';
                 feedback.style.color = '#fbbf24';
-                feedback.innerText = `⚠️ Tiempo de espera agotado para #${code}. Verifica que el anfitrión tenga la sala abierta e intenta de nuevo.`;
+                feedback.innerText = `⚠️ Tiempo de espera agotado para #${code}. Verifica el código e intenta de nuevo.`;
             }
         }, 12000);
 
@@ -737,7 +905,7 @@ const MP = {
             btn.innerText = '🔗 INGRESAR A LA SALA';
             feedback.style.color = '#ef4444';
             if (err && err.type === 'peer-unavailable') {
-                feedback.innerText = `❌ La sala #${code} no se encuentra activa en este momento.`;
+                feedback.innerText = `❌ La sala #${code} no existe o el anfitrión la cerró.`;
             } else {
                 feedback.innerText = `❌ Error de enlace (${err.type || 'red'}). Intenta de nuevo.`;
             }
@@ -745,7 +913,7 @@ const MP = {
 
         this.peer.on('open', () => {
             feedback.innerText = `🔗 Estableciendo túnel directo con sala #${code}...`;
-            const conn = this.peer.connect('nasa-cubo-phora-' + code, { reliable: true, serialization: 'json' });
+            const conn = this.peer.connect(PREFIJO_SALA + code, { reliable: true, serialization: 'json' });
             this.hostConn = conn;
 
             conn.on('open', () => {
@@ -774,38 +942,7 @@ const MP = {
                     btn.innerText = '🔗 INGRESAR A LA SALA';
 
                     this.maxPlayers = data.maxPlayers;
-                    const myLocal = this.players[this.myId];
-
-                    const prevIds = Object.keys(this.players);
-                    const nextPlayers = data.players || {};
-                    const now = performance.now();
-                    Object.values(nextPlayers).forEach(np => {
-                        np.lastSeen = now;
-                    });
-
-                    prevIds.forEach(oldId => {
-                        if (oldId !== this.myId && !nextPlayers[oldId] && this.players[oldId]) {
-                            const gone = this.players[oldId];
-                            const rObj = GAME_DATA.roles.find(r => r.id === gone.roleId);
-                            this.showNetworkToast(`⚠️ ${gone.name} (${rObj ? rObj.short : 'Tripulante'}) salió de la partida. Misiones actualizadas.`);
-                        }
-                    });
-
-                    this.players = nextPlayers;
-
-                    if (this.players[this.myId] && this.players[this.myId].roleId) {
-                        const assignedRole = GAME_DATA.roles.find(r => r.id === this.players[this.myId].roleId);
-                        if (assignedRole) {
-                            GAME_STATE.selectedRole = assignedRole;
-                            if (typeof updateTopMissionBadge === 'function') updateTopMissionBadge();
-                        }
-                    }
-
-                    if (myLocal && this.players[this.myId]) {
-                        this.players[this.myId].x = myLocal.x;
-                        this.players[this.myId].y = myLocal.y;
-                        this.players[this.myId].z = myLocal.z;
-                    }
+                    this.applySyncedPlayersFromHost(data.players || {});
 
                     this.refreshTakenRolesFromPlayers();
                     this.renderLobbyRoles();
@@ -828,7 +965,30 @@ const MP = {
                     if (typeof resetAllInputStates === 'function') resetAllInputStates();
                     document.getElementById('lobby-modal').classList.add('hidden');
                     this.updateHudBadge();
+                    const badge = document.getElementById('net-status-badge');
+                    if (badge) badge.innerText = `● Conectado a Sala #${this.roomCode}`;
                     if (typeof lockGamePointer === 'function') lockGamePointer();
+
+                } else if (data.type === 'WORLD_STATE') {
+                    // Estado autoritativo enviado ~10 veces por segundo desde el anfitrión
+                    if (!joinedOk) return;
+                    this.maxPlayers = data.maxPlayers || this.maxPlayers;
+                    this.applySyncedPlayersFromHost(data.players || {});
+                    this.refreshTakenRolesFromPlayers();
+                    this.updateHudBadge();
+
+                    if (data.completedTasksByRole) {
+                        this.completedTasksByRole = data.completedTasksByRole;
+                        if (typeof onRemoteTaskStateUpdated === 'function') {
+                            onRemoteTaskStateUpdated();
+                        }
+                    }
+
+                    if (data.missionId && data.missionId !== GAME_STATE.selectedMission.id) {
+                        GAME_STATE.selectedMission = GAME_DATA.missions.find(m => m.id === data.missionId) || GAME_STATE.selectedMission;
+                        if (typeof updateWindowPlanet === 'function') updateWindowPlanet(GAME_STATE.selectedMission.id);
+                        if (typeof updateTopMissionBadge === 'function') updateTopMissionBadge();
+                    }
 
                 } else if (data.type === 'MOVE' || data.type === 'HEARTBEAT') {
                     if (data.id !== this.myId && this.players[data.id]) {
@@ -858,20 +1018,28 @@ const MP = {
                 }
             });
 
+            // Si se va el anfitrión, todos vuelven al menú principal
             conn.on('close', () => {
-                if (joinedOk) {
-                    document.getElementById('net-status-badge').innerText = '● Anfitrión desconectado (Modo Individual)';
-                    Object.keys(this.players).forEach(pid => {
-                        if (pid !== this.myId) delete this.players[pid];
-                    });
-                    this.isHost = true;
-                    this.maxPlayers = 1;
-                    this.refreshTakenRolesFromPlayers();
-                    this.renderPlayersList();
-                    this.showNetworkToast('⚠️ El anfitrión cerró la sala. Misiones desbloqueadas.');
-                    if (typeof onRemoteTaskStateUpdated === 'function') {
-                        onRemoteTaskStateUpdated();
+                if (joinedOk && !this.voluntaryLeave) {
+                    if (typeof stopArenaLoop === 'function') stopArenaLoop();
+                    const arenaEl = document.getElementById('arena-container');
+                    if (arenaEl) arenaEl.classList.add('hidden');
+                    const reportEl = document.getElementById('report-modal');
+                    if (reportEl) reportEl.classList.add('hidden');
+                    const taskEl = document.getElementById('planet-task-modal');
+                    if (taskEl) taskEl.classList.add('hidden');
+                    const radarEl = document.getElementById('sector-radar-box');
+                    if (radarEl) radarEl.classList.add('hidden');
+
+                    const ccEl = document.getElementById('control-center-container');
+                    if (ccEl && ccEl.classList.contains('hidden')) {
+                        ccEl.classList.remove('hidden');
+                        if (typeof animateControlCenter === 'function' && !ccAnimId) {
+                            animateControlCenter();
+                        }
                     }
+
+                    this.leaveCurrentRoom(true);
                 }
             });
         });
@@ -901,23 +1069,21 @@ const MP = {
                 roleId: GAME_STATE.selectedRole.id
             });
         }
-        if (now - this.lastSendTime < 45) return;
+        if (now - this.lastSendTime < 50) return;
         this.lastSendTime = now;
 
-        const msg = {
-            type: 'MOVE',
-            id: this.myId,
-            pos: {
-                x, y, z, rotY, moving,
-                name: this.myName,
-                characterId: GAME_STATE.selectedCharacterId,
-                roleId: GAME_STATE.selectedRole.id
-            }
-        };
-        if (this.isHost) {
-            this.guestConns.forEach(c => { if (c.open) c.send(msg); });
-        } else if (this.hostConn && this.hostConn.open) {
-            this.hostConn.send(msg);
+        // Los clientes envían sus movimientos al anfitrión; el anfitrión difunde el estado global a 10 Hz
+        if (!this.isHost && this.hostConn && this.hostConn.open) {
+            this.hostConn.send({
+                type: 'MOVE',
+                id: this.myId,
+                pos: {
+                    x, y, z, rotY, moving,
+                    name: this.myName,
+                    characterId: GAME_STATE.selectedCharacterId,
+                    roleId: GAME_STATE.selectedRole.id
+                }
+            });
         }
     },
 
