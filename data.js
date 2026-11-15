@@ -1,10 +1,10 @@
 const GAME_DATA = {
-    // Personajes jugables: Los Backyardigans en 3D realista
+    // Personajes jugables: Los Backyardigans en 3D
     characters: [
-        { id: 'pablo', name: 'Pablo', species: 'Pingüino Azul', colorCss: '#3b82f6', defaultRole: 'commander' },
-        { id: 'uniqua', name: 'Uniqua (Yonicua)', species: 'Exploradora Rosa', colorCss: '#ec4899', defaultRole: 'engineer' },
-        { id: 'tyrone', name: 'Tyrone', species: 'Alce Naranja', colorCss: '#f97316', defaultRole: 'scientist' },
-        { id: 'tasha', name: 'Tasha', species: 'Hipopótamo Amarilla', colorCss: '#eab308', defaultRole: 'comms' }
+        { id: 'pablo', name: 'Pablo', shortName: 'Pablo', species: 'Pingüino Azul', colorCss: '#3b82f6' },
+        { id: 'uniqua', name: 'Yonicua (Uniqua)', shortName: 'Yonicua', species: 'Exploradora Rosa', colorCss: '#ec4899' },
+        { id: 'tyrone', name: 'Tyrone', shortName: 'Tyrone', species: 'Alce Naranja', colorCss: '#f97316' },
+        { id: 'tasha', name: 'Tasha', shortName: 'Tasha', species: 'Hipopótamo Amarilla', colorCss: '#eab308' }
     ],
     missions: [
         {
@@ -13,7 +13,7 @@ const GAME_DATA = {
             orbitLabel: 'ÓRBITA ACTUAL: LA LUNA',
             difficulty: 'Fácil',
             rewardCredits: 450,
-            desc: 'Estación polar en cráteres lunares con reservas de hielo.',
+            desc: 'Complejo subterráneo en cráteres lunares con reservas de hielo.',
             groundColor: 0x64748b,
             skyColor: 0x050814,
             accentColor: 0x38bdf8,
@@ -25,7 +25,7 @@ const GAME_DATA = {
             orbitLabel: 'ÓRBITA ACTUAL: PLANETA MARTE',
             difficulty: 'Normal',
             rewardCredits: 750,
-            desc: 'Complejo de investigación en la superficie roja marciana.',
+            desc: 'Estación de investigación presurizada en la superficie roja marciana.',
             groundColor: 0xb45309,
             skyColor: 0x261209,
             accentColor: 0x10b981,
@@ -44,58 +44,48 @@ const GAME_DATA = {
             asteroidCount: 18
         }
     ],
-    // Taller modular completo: 8 categorías individuales de piezas con precios
+    // Taller por partes simples: Pico, Alas, Motor y Humo, Fuselaje y Pintura
+    // Incluye 2 piezas gratis (0 CR) en las partes principales para poder customizar desde el inicio
     shipCustomization: {
-        primaryColors: [
-            { id: 'pcol_white', name: 'Blanco NASA', price: 0, hex: 0xf8fafc, css: '#f8fafc', desc: 'Acabado cerámico base' },
-            { id: 'pcol_orange', name: 'Naranja Experimental', price: 200, hex: 0xf97316, css: '#f97316', desc: 'Pintura térmica de pruebas' },
-            { id: 'pcol_cobalt', name: 'Azul Cobalto', price: 350, hex: 0x2563eb, css: '#2563eb', desc: 'Aleación azul metalizada' },
-            { id: 'pcol_crimson', name: 'Rojo Carmesí', price: 500, hex: 0xdc2626, css: '#dc2626', desc: 'Esmalte de alto contraste' },
-            { id: 'pcol_stealth', name: 'Titanio Sigilo', price: 700, hex: 0x1e293b, css: '#1e293b', desc: 'Recubrimiento oscuro antirradar' },
-            { id: 'pcol_gold', name: 'Oro Orbital VIP', price: 1000, hex: 0xeab308, css: '#eab308', desc: 'Baño metálico dorado de lujo' }
-        ],
-        secondaryColors: [
-            { id: 'scol_red', name: 'Franjas Rojo Cohete', price: 0, hex: 0xef4444, css: '#ef4444', desc: 'Detalles rojos clásicos' },
-            { id: 'scol_cyan', name: 'Neón Cian', price: 150, hex: 0x06b6d4, css: '#06b6d4', desc: 'Acentos azul eléctrico' },
-            { id: 'scol_emerald', name: 'Verde Esmeralda', price: 250, hex: 0x10b981, css: '#10b981', desc: 'Acentos bio-orbitales' },
-            { id: 'scol_amber', name: 'Amarillo Seguridad', price: 400, hex: 0xf59e0b, css: '#f59e0b', desc: 'Bandas industriales ámbar' },
-            { id: 'scol_purple', name: 'Púrpura Cuántico', price: 600, hex: 0x9333ea, css: '#9333ea', desc: 'Acabado violeta de plasma' }
-        ],
-        hulls: [
-            { id: 'hull_standard', name: 'Fuselaje Cilíndrico', price: 0, desc: 'Estructura estándar equilibrada', speedBonus: 0, shieldBonus: 0, o2Bonus: 0 },
-            { id: 'hull_slim', name: 'Casco Estrecho Velocidad', price: 300, desc: '+15% velocidad aerodinámica', speedBonus: 0.15, shieldBonus: 0, o2Bonus: 0 },
-            { id: 'hull_heavy', name: 'Blindaje Hexagonal Pesado', price: 550, desc: '+35% escudo estructural', speedBonus: 0, shieldBonus: 35, o2Bonus: 0 },
-            { id: 'hull_cryo', name: 'Doble Tanque Criogénico', price: 850, desc: '+45s oxígeno y +20% escudo', speedBonus: 0.05, shieldBonus: 20, o2Bonus: 45 }
-        ],
-        cockpits: [
-            { id: 'cockpit_round', name: 'Ojo de Buey Clásico', price: 0, desc: 'Ventanilla circular estándar', speedBonus: 0, shieldBonus: 0, o2Bonus: 0 },
-            { id: 'cockpit_fighter', name: 'Cúpula Panorámica Caza', price: 250, desc: '+10% velocidad de respuesta', speedBonus: 0.10, shieldBonus: 5, o2Bonus: 0 },
-            { id: 'cockpit_armored', name: 'Visor Blindado Táctico', price: 500, desc: '+25% escudo de cabina', speedBonus: 0, shieldBonus: 25, o2Bonus: 10 },
-            { id: 'cockpit_bridge', name: 'Puente Cristal Orbital', price: 800, desc: '+30s oxígeno y +20% escudo', speedBonus: 0.08, shieldBonus: 20, o2Bonus: 30 }
-        ],
         noses: [
-            { id: 'nose_standard', name: 'Cono Aerodinámico', price: 0, desc: 'Punta cónica estándar', speedBonus: 0, shieldBonus: 0, o2Bonus: 0 },
-            { id: 'nose_shield', name: 'Morro Escudo Reforzado', price: 300, desc: '+20% escudo frontal', speedBonus: 0, shieldBonus: 20, o2Bonus: 0 },
-            { id: 'nose_drill', name: 'Taladro Rompe-Asteroides', price: 600, desc: '+35% escudo anti-impacto', speedBonus: 0, shieldBonus: 35, o2Bonus: 0 },
-            { id: 'nose_laser', name: 'Aguja Sensor Cuántico', price: 850, desc: '+40% escudo y +10% velocidad', speedBonus: 0.10, shieldBonus: 40, o2Bonus: 0 }
+            { id: 'nose_standard', name: 'Pico Cónico Clásico', price: 0, desc: 'Punta estándar equilibrada', speedBonus: 0, shieldBonus: 0, o2Bonus: 0 },
+            { id: 'nose_needle', name: 'Pico Supersónico Afilado', price: 0, desc: '+10% velocidad de vuelo (Gratis)', speedBonus: 0.10, shieldBonus: 0, o2Bonus: 0 },
+            { id: 'nose_shield', name: 'Pico Escudo Redondo', price: 250, desc: '+20% escudo frontal', speedBonus: 0, shieldBonus: 20, o2Bonus: 0 },
+            { id: 'nose_drill', name: 'Pico Taladro Meteoritos', price: 450, desc: '+35% escudo anti-impacto', speedBonus: 0, shieldBonus: 35, o2Bonus: 0 },
+            { id: 'nose_laser', name: 'Pico Láser Cuántico', price: 700, desc: '+40% escudo y +12% velocidad', speedBonus: 0.12, shieldBonus: 40, o2Bonus: 0 }
         ],
         wings: [
             { id: 'wing_delta', name: 'Aletas Delta Clásicas', price: 0, desc: '4 aletas estabilizadoras', speedBonus: 0, shieldBonus: 0, o2Bonus: 0 },
-            { id: 'wing_aero', name: 'Alas Aeroespaciales', price: 300, desc: '+20s de oxígeno extra', speedBonus: 0.05, shieldBonus: 0, o2Bonus: 20 },
-            { id: 'wing_ring', name: 'Anillo Orbital Cuántico', price: 600, desc: '+35s oxígeno y +15% escudo', speedBonus: 0.08, shieldBonus: 15, o2Bonus: 35 },
-            { id: 'wing_interceptor', name: 'Alas Interceptor Dobles', price: 900, desc: '+50s oxígeno y +15% velocidad', speedBonus: 0.15, shieldBonus: 10, o2Bonus: 50 }
+            { id: 'wing_aero', name: 'Alas de Caza Extendidas', price: 0, desc: '+15s oxígeno extra (Gratis)', speedBonus: 0.05, shieldBonus: 0, o2Bonus: 15 },
+            { id: 'wing_interceptor', name: 'Alas Dobles Interceptor', price: 350, desc: '+35s oxígeno y +12% velocidad', speedBonus: 0.12, shieldBonus: 10, o2Bonus: 35 },
+            { id: 'wing_ring', name: 'Anillo Orbital Cuántico', price: 650, desc: '+50s oxígeno y +20% escudo', speedBonus: 0.10, shieldBonus: 20, o2Bonus: 50 }
         ],
         boosters: [
-            { id: 'boost_standard', name: 'Tobera Central Única', price: 0, desc: 'Propulsión base', speedBonus: 1.0, shieldBonus: 0, o2Bonus: 0 },
-            { id: 'boost_twin', name: 'Propulsores Gemelos', price: 350, desc: '+15% velocidad y +10% escudo', speedBonus: 1.15, shieldBonus: 10, o2Bonus: 0 },
-            { id: 'boost_heavy', name: 'Cuádruple Núcleo Pesado', price: 650, desc: '+25% velocidad y +25% escudo', speedBonus: 1.25, shieldBonus: 25, o2Bonus: 0 },
-            { id: 'boost_plasma', name: 'Reactores Plasma X4', price: 950, desc: '+40% velocidad y +35% escudo', speedBonus: 1.40, shieldBonus: 35, o2Bonus: 0 }
+            { id: 'boost_standard', name: 'Motor Único (Humo Blanco)', price: 0, flameHex: 0xf59e0b, smokeHex: 0xe2e8f0, desc: '1 tobera central y humo blanco', speedBonus: 1.0, shieldBonus: 0, o2Bonus: 0 },
+            { id: 'boost_twin', name: 'Doble Motor (Humo Azul)', price: 0, flameHex: 0x38bdf8, smokeHex: 0xbae6fd, desc: '+12% velocidad y estela azul (Gratis)', speedBonus: 1.12, shieldBonus: 5, o2Bonus: 0 },
+            { id: 'boost_heavy', name: 'Triple Núcleo (Humo Verde)', price: 350, flameHex: 0x10b981, smokeHex: 0xa7f3d0, desc: '+25% velocidad y estela esmeralda', speedBonus: 1.25, shieldBonus: 20, o2Bonus: 0 },
+            { id: 'boost_plasma', name: 'Reactores Plasma X4 (Violeta)', price: 650, flameHex: 0xa855f7, smokeHex: 0xe9d5ff, desc: '+40% velocidad y estela de plasma', speedBonus: 1.40, shieldBonus: 35, o2Bonus: 0 }
         ],
-        addons: [
-            { id: 'addon_none', name: 'Chasis Limpio', price: 0, desc: 'Sin accesorios externos', speedBonus: 0, shieldBonus: 0, o2Bonus: 0 },
-            { id: 'addon_antenna', name: 'Antena Telemetría HD', price: 250, desc: '+15s reserva de oxígeno', speedBonus: 0, shieldBonus: 5, o2Bonus: 15 },
-            { id: 'addon_cannons', name: 'Torretas Láser Gemelas', price: 550, desc: '+25% escudo táctico', speedBonus: 0.05, shieldBonus: 25, o2Bonus: 10 },
-            { id: 'addon_solar', name: 'Paneles Solares Orbitales', price: 850, desc: '+45s oxígeno y +20% escudo', speedBonus: 0.05, shieldBonus: 20, o2Bonus: 45 }
+        hulls: [
+            { id: 'hull_standard', name: 'Fuselaje Cilíndrico', price: 0, desc: 'Cuerpo estándar de la nave', speedBonus: 0, shieldBonus: 0, o2Bonus: 0 },
+            { id: 'hull_slim', name: 'Fuselaje Estrecho Veloz', price: 250, desc: '+15% velocidad aerodinámica', speedBonus: 0.15, shieldBonus: 0, o2Bonus: 0 },
+            { id: 'hull_heavy', name: 'Fuselaje Blindado Hexagonal', price: 450, desc: '+30% escudo estructural', speedBonus: 0, shieldBonus: 30, o2Bonus: 0 },
+            { id: 'hull_cryo', name: 'Fuselaje Doble Tanque', price: 700, desc: '+45s oxígeno y +20% escudo', speedBonus: 0.05, shieldBonus: 20, o2Bonus: 45 }
+        ],
+        primaryColors: [
+            { id: 'pcol_white', name: 'Blanco NASA', price: 0, hex: 0xf8fafc, css: '#f8fafc', desc: 'Pintura blanca espacial' },
+            { id: 'pcol_cobalt', name: 'Azul Espacial', price: 0, hex: 0x2563eb, css: '#2563eb', desc: 'Pintura azul metálica (Gratis)' },
+            { id: 'pcol_crimson', name: 'Rojo Cohete', price: 200, hex: 0xdc2626, css: '#dc2626', desc: 'Pintura roja brillante' },
+            { id: 'pcol_orange', name: 'Naranja Solar', price: 350, hex: 0xf97316, css: '#f97316', desc: 'Pintura térmica experimental' },
+            { id: 'pcol_stealth', name: 'Negro Sigilo', price: 550, hex: 0x1e293b, css: '#1e293b', desc: 'Blindaje oscuro antirradar' },
+            { id: 'pcol_gold', name: 'Oro Orbital VIP', price: 800, hex: 0xeab308, css: '#eab308', desc: 'Baño dorado de lujo' }
+        ],
+        secondaryColors: [
+            { id: 'scol_red', name: 'Franjas Rojas', price: 0, hex: 0xef4444, css: '#ef4444', desc: 'Acentos rojos clásicos' },
+            { id: 'scol_cyan', name: 'Franjas Cian Neón', price: 0, hex: 0x06b6d4, css: '#06b6d4', desc: 'Acentos azul neón (Gratis)' },
+            { id: 'scol_amber', name: 'Franjas Amarillas', price: 200, hex: 0xf59e0b, css: '#f59e0b', desc: 'Bandas industriales ámbar' },
+            { id: 'scol_emerald', name: 'Franjas Verde Láser', price: 350, hex: 0x10b981, css: '#10b981', desc: 'Acentos bio-orbitales' },
+            { id: 'scol_purple', name: 'Franjas Púrpura', price: 500, hex: 0x9333ea, css: '#9333ea', desc: 'Acabado violeta' }
         ]
     },
     roles: [
@@ -107,9 +97,9 @@ const GAME_DATA = {
             colorCss: '#38bdf8',
             bonus: 'Control de Puente y Navegación',
             tasks: [
-                { id: 'cmd_nav', title: 'Calibrar Ruta de Retorno', wallLabel: 'PUENTE: RUTA', type: 'sequence', x: -3.2, z: -13.9, rotY: 0 },
-                { id: 'cmd_shield', title: 'Alinear Escudos de Base', wallLabel: 'PUENTE: ESCUDOS', type: 'timing', x: 3.2, z: -13.9, rotY: 0 },
-                { id: 'cmd_thruster', title: 'Verificar Vector Orbital', wallLabel: 'ALA NORTE: VECTOR', type: 'slider', x: 0, z: -13.9, rotY: 0 }
+                { id: 'cmd_nav', title: 'Calibrar Ruta de Retorno', wallLabel: 'PUENTE: RUTA', type: 'sequence', x: -3.4, z: -14.8, rotY: 0 },
+                { id: 'cmd_shield', title: 'Alinear Escudos de Base', wallLabel: 'PUENTE: ESCUDOS', type: 'timing', x: 3.4, z: -14.8, rotY: 0 },
+                { id: 'cmd_thruster', title: 'Verificar Vector Orbital', wallLabel: 'NORTE: VECTOR', type: 'slider', x: 0, z: -14.8, rotY: 0 }
             ]
         },
         {
@@ -120,9 +110,9 @@ const GAME_DATA = {
             colorCss: '#f59e0b',
             bonus: 'Reactores, Energía y Casco',
             tasks: [
-                { id: 'eng_wires', title: 'Conectar Bus del Reactor', wallLabel: 'REACTOR: CABLES', type: 'wires', x: -13.9, z: -3.2, rotY: Math.PI / 2 },
-                { id: 'eng_hull', title: 'Soldar Microfisuras de Casco', wallLabel: 'REACTOR: CASCO', type: 'rivets', x: -13.9, z: 3.2, rotY: Math.PI / 2 },
-                { id: 'eng_core', title: 'Estabilizar Turbina Térmica', wallLabel: 'ALA OESTE: TURBINA', type: 'timing', x: -13.9, z: 0, rotY: Math.PI / 2 }
+                { id: 'eng_wires', title: 'Conectar Bus del Reactor', wallLabel: 'REACTOR: CABLES', type: 'wires', x: -14.8, z: -3.4, rotY: Math.PI / 2 },
+                { id: 'eng_hull', title: 'Soldar Microfisuras de Casco', wallLabel: 'REACTOR: CASCO', type: 'rivets', x: -14.8, z: 3.4, rotY: Math.PI / 2 },
+                { id: 'eng_core', title: 'Estabilizar Núcleo Térmico', wallLabel: 'OESTE: NÚCLEO', type: 'timing', x: -14.8, z: 0, rotY: Math.PI / 2 }
             ]
         },
         {
@@ -133,9 +123,9 @@ const GAME_DATA = {
             colorCss: '#10b981',
             bonus: 'Laboratorio y Muestras',
             tasks: [
-                { id: 'sci_cryo', title: 'Ajustar Cámara Criogénica', wallLabel: 'LAB: CRIOGENIA', type: 'temp', x: 13.9, z: -3.2, rotY: -Math.PI / 2 },
-                { id: 'sci_dna', title: 'Secuenciar Muestra Mineral', wallLabel: 'LAB: MUESTRAS', type: 'sequence', x: 13.9, z: 3.2, rotY: -Math.PI / 2 },
-                { id: 'sci_drill', title: 'Analizar Núcleo Planetario', wallLabel: 'ALA ESTE: NÚCLEO', type: 'timing', x: 13.9, z: 0, rotY: -Math.PI / 2 }
+                { id: 'sci_cryo', title: 'Ajustar Cámara Criogénica', wallLabel: 'LAB: CRIOGENIA', type: 'temp', x: 14.8, z: -3.4, rotY: -Math.PI / 2 },
+                { id: 'sci_dna', title: 'Secuenciar Muestra Mineral', wallLabel: 'LAB: MUESTRAS', type: 'sequence', x: 14.8, z: 3.4, rotY: -Math.PI / 2 },
+                { id: 'sci_drill', title: 'Analizar Escáner MedBay', wallLabel: 'ESTE: ESCÁNER', type: 'timing', x: 14.8, z: 0, rotY: -Math.PI / 2 }
             ]
         },
         {
@@ -146,13 +136,27 @@ const GAME_DATA = {
             colorCss: '#a855f7',
             bonus: 'Antenas, Datos y Telemetría',
             tasks: [
-                { id: 'com_freq', title: 'Sintonizar Antena con Tierra', wallLabel: 'COMMS: ANTENA', type: 'slider', x: -3.2, z: 13.9, rotY: Math.PI },
-                { id: 'com_nodes', title: 'Enlazar Nodos Satelitales', wallLabel: 'COMMS: NODOS', type: 'wires', x: 3.2, z: 13.9, rotY: Math.PI },
-                { id: 'com_data', title: 'Codificar Paquete Científico', wallLabel: 'ALA SUR: DATOS', type: 'sequence', x: 0, z: 13.9, rotY: Math.PI }
+                { id: 'com_freq', title: 'Sintonizar Antena con Tierra', wallLabel: 'COMMS: ANTENA', type: 'slider', x: -3.4, z: 14.8, rotY: Math.PI },
+                { id: 'com_nodes', title: 'Enlazar Nodos Satelitales', wallLabel: 'COMMS: NODOS', type: 'wires', x: 3.4, z: 14.8, rotY: Math.PI },
+                { id: 'com_data', title: 'Codificar Paquete Científico', wallLabel: 'SUR: TELEMETRÍA', type: 'sequence', x: 0, z: 14.8, rotY: Math.PI }
             ]
         }
     ]
 };
+
+const DEFAULT_UNLOCKED_PARTS = [
+    'nose_standard',
+    'nose_needle',
+    'wing_delta',
+    'wing_aero',
+    'boost_standard',
+    'boost_twin',
+    'hull_standard',
+    'pcol_white',
+    'pcol_cobalt',
+    'scol_red',
+    'scol_cyan'
+];
 
 const GAME_STATE = {
     currentOrbitId: 'earth',
@@ -160,64 +164,53 @@ const GAME_STATE = {
     selectedRole: GAME_DATA.roles[0],
     selectedCharacterId: 'pablo',
     credits: 500,
-    unlockedParts: [
-        'pcol_white',
-        'scol_red',
-        'hull_standard',
-        'cockpit_round',
-        'nose_standard',
-        'wing_delta',
-        'boost_standard',
-        'addon_none'
-    ],
+    unlockedParts: [...DEFAULT_UNLOCKED_PARTS],
     shipConfig: {
-        primaryColor: GAME_DATA.shipCustomization.primaryColors[0],
-        secondaryColor: GAME_DATA.shipCustomization.secondaryColors[0],
-        hull: GAME_DATA.shipCustomization.hulls[0],
-        cockpit: GAME_DATA.shipCustomization.cockpits[0],
         nose: GAME_DATA.shipCustomization.noses[0],
         wing: GAME_DATA.shipCustomization.wings[0],
         booster: GAME_DATA.shipCustomization.boosters[0],
-        addon: GAME_DATA.shipCustomization.addons[0]
+        hull: GAME_DATA.shipCustomization.hulls[0],
+        primaryColor: GAME_DATA.shipCustomization.primaryColors[0],
+        secondaryColor: GAME_DATA.shipCustomization.secondaryColors[0]
     },
 
     loadProgress() {
         try {
-            const raw = localStorage.getItem('cubo_phora_save_v2');
+            const raw = localStorage.getItem('cubo_phora_save_v3');
             if (!raw) return;
             const saved = JSON.parse(raw);
             if (typeof saved.credits === 'number') this.credits = saved.credits;
-            if (Array.isArray(saved.unlockedParts)) this.unlockedParts = saved.unlockedParts;
-            if (saved.selectedCharacterId) this.selectedCharacterId = saved.selectedCharacterId;
+            if (Array.isArray(saved.unlockedParts)) {
+                this.unlockedParts = Array.from(new Set([...DEFAULT_UNLOCKED_PARTS, ...saved.unlockedParts]));
+            }
+            if (saved.selectedCharacterId && GAME_DATA.characters.some(c => c.id === saved.selectedCharacterId)) {
+                this.selectedCharacterId = saved.selectedCharacterId;
+            }
             if (saved.equipped) {
                 const cust = GAME_DATA.shipCustomization;
-                this.shipConfig.primaryColor = cust.primaryColors.find(x => x.id === saved.equipped.primaryColor) || cust.primaryColors[0];
-                this.shipConfig.secondaryColor = cust.secondaryColors.find(x => x.id === saved.equipped.secondaryColor) || cust.secondaryColors[0];
-                this.shipConfig.hull = cust.hulls.find(x => x.id === saved.equipped.hull) || cust.hulls[0];
-                this.shipConfig.cockpit = cust.cockpits.find(x => x.id === saved.equipped.cockpit) || cust.cockpits[0];
                 this.shipConfig.nose = cust.noses.find(x => x.id === saved.equipped.nose) || cust.noses[0];
                 this.shipConfig.wing = cust.wings.find(x => x.id === saved.equipped.wing) || cust.wings[0];
                 this.shipConfig.booster = cust.boosters.find(x => x.id === saved.equipped.booster) || cust.boosters[0];
-                this.shipConfig.addon = cust.addons.find(x => x.id === saved.equipped.addon) || cust.addons[0];
+                this.shipConfig.hull = cust.hulls.find(x => x.id === saved.equipped.hull) || cust.hulls[0];
+                this.shipConfig.primaryColor = cust.primaryColors.find(x => x.id === saved.equipped.primaryColor) || cust.primaryColors[0];
+                this.shipConfig.secondaryColor = cust.secondaryColors.find(x => x.id === saved.equipped.secondaryColor) || cust.secondaryColors[0];
             }
         } catch (_) {}
     },
 
     saveProgress() {
         try {
-            localStorage.setItem('cubo_phora_save_v2', JSON.stringify({
+            localStorage.setItem('cubo_phora_save_v3', JSON.stringify({
                 credits: this.credits,
                 unlockedParts: this.unlockedParts,
                 selectedCharacterId: this.selectedCharacterId,
                 equipped: {
-                    primaryColor: this.shipConfig.primaryColor.id,
-                    secondaryColor: this.shipConfig.secondaryColor.id,
-                    hull: this.shipConfig.hull.id,
-                    cockpit: this.shipConfig.cockpit.id,
                     nose: this.shipConfig.nose.id,
                     wing: this.shipConfig.wing.id,
                     booster: this.shipConfig.booster.id,
-                    addon: this.shipConfig.addon.id
+                    hull: this.shipConfig.hull.id,
+                    primaryColor: this.shipConfig.primaryColor.id,
+                    secondaryColor: this.shipConfig.secondaryColor.id
                 }
             }));
         } catch (_) {}
@@ -225,16 +218,16 @@ const GAME_STATE = {
 
     getShipTotalStats() {
         const c = this.shipConfig;
-        const speedMult = c.booster.speedBonus + c.hull.speedBonus + c.cockpit.speedBonus + c.nose.speedBonus + c.wing.speedBonus + c.addon.speedBonus;
-        const shieldBonus = c.booster.shieldBonus + c.hull.shieldBonus + c.cockpit.shieldBonus + c.nose.shieldBonus + c.wing.shieldBonus + c.addon.shieldBonus;
-        const o2Bonus = c.booster.o2Bonus + c.hull.o2Bonus + c.cockpit.o2Bonus + c.nose.o2Bonus + c.wing.o2Bonus + c.addon.o2Bonus;
+        const speedMult = c.booster.speedBonus + c.hull.speedBonus + c.nose.speedBonus + c.wing.speedBonus;
+        const shieldBonus = c.booster.shieldBonus + c.hull.shieldBonus + c.nose.shieldBonus + c.wing.shieldBonus;
+        const o2Bonus = c.booster.o2Bonus + c.hull.o2Bonus + c.nose.o2Bonus + c.wing.o2Bonus;
         return { speedMult, shieldBonus, o2Bonus };
     }
 };
 
 GAME_STATE.loadProgress();
 
-// Construye la nave 3D modular reflejando las 8 categorías del Taller
+// Construye la nave 3D reflejando Pico, Alas, Motor+Humo, Fuselaje y Pintura
 function buildCustom3DRocket(includeFlame) {
     const rocket = new THREE.Group();
     const cfg = GAME_STATE.shipConfig;
@@ -245,7 +238,7 @@ function buildCustom3DRocket(includeFlame) {
     const glassMat = new THREE.MeshStandardMaterial({ color: 0x38bdf8, metalness: 0.85, roughness: 0.1 });
     const cyanGlowMat = new THREE.MeshStandardMaterial({ color: 0x38bdf8, emissive: 0x0284c7, emissiveIntensity: 0.7 });
 
-    // 1. Fuselaje / Casco según configuración
+    // 1. Fuselaje
     let topRadius = 0.58;
     if (cfg.hull.id === 'hull_slim') {
         topRadius = 0.46;
@@ -269,37 +262,21 @@ function buildCustom3DRocket(includeFlame) {
         rocket.add(body);
     }
 
-    // Franja decorativa del color secundario en el fuselaje
     const stripe = new THREE.Mesh(new THREE.CylinderGeometry(topRadius + 0.02, topRadius + 0.04, 0.28, 24), accentMat);
     stripe.position.y = 0.1;
     rocket.add(stripe);
 
-    // 2. Cabina / Cúpula según configuración
-    if (cfg.cockpit.id === 'cockpit_fighter') {
-        const canopy = new THREE.Mesh(new THREE.SphereGeometry(0.36, 20, 16), glassMat);
-        canopy.position.set(0, 0.72, 0.45);
-        canopy.scale.set(0.95, 1.55, 0.85);
-        rocket.add(canopy);
-    } else if (cfg.cockpit.id === 'cockpit_armored') {
-        const visorFrame = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.34, 0.28), accentMat);
-        visorFrame.position.set(0, 0.72, 0.48);
-        rocket.add(visorFrame);
-        const slit = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.14, 0.3), cyanGlowMat);
-        slit.position.set(0, 0.72, 0.5);
-        rocket.add(slit);
-    } else if (cfg.cockpit.id === 'cockpit_bridge') {
-        const ringGlass = new THREE.Mesh(new THREE.CylinderGeometry(topRadius + 0.03, topRadius + 0.03, 0.42, 24), glassMat);
-        ringGlass.position.y = 0.75;
-        rocket.add(ringGlass);
-    } else {
-        const cockpitWindow = new THREE.Mesh(new THREE.SphereGeometry(0.28, 16, 16), glassMat);
-        cockpitWindow.position.set(0, 0.68, topRadius - 0.05);
-        rocket.add(cockpitWindow);
-    }
+    const cockpitWindow = new THREE.Mesh(new THREE.SphereGeometry(0.28, 16, 16), glassMat);
+    cockpitWindow.position.set(0, 0.68, topRadius - 0.05);
+    rocket.add(cockpitWindow);
 
-    // 3. Morro / Punta frontal según configuración
-    if (cfg.nose.id === 'nose_shield') {
-        const dome = new THREE.Mesh(new THREE.SphereGeometry(topRadius + 0.04, 24, 16), accentMat);
+    // 2. Pico / Morro frontal
+    if (cfg.nose.id === 'nose_needle') {
+        const needle = new THREE.Mesh(new THREE.ConeGeometry(topRadius, 1.85, 24), accentMat);
+        needle.position.y = 2.35;
+        rocket.add(needle);
+    } else if (cfg.nose.id === 'nose_shield') {
+        const dome = new THREE.Mesh(new THREE.SphereGeometry(topRadius + 0.05, 24, 16), accentMat);
         dome.position.y = 1.65;
         dome.scale.set(1, 1.4, 1);
         rocket.add(dome);
@@ -311,8 +288,8 @@ function buildCustom3DRocket(includeFlame) {
         const nose = new THREE.Mesh(new THREE.ConeGeometry(topRadius, 1.0, 24), accentMat);
         nose.position.y = 1.95;
         rocket.add(nose);
-        const spire = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.12, 0.85, 12), cyanGlowMat);
-        spire.position.y = 2.68;
+        const spire = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.12, 0.9, 12), cyanGlowMat);
+        spire.position.y = 2.72;
         rocket.add(spire);
     } else {
         const nose = new THREE.Mesh(new THREE.ConeGeometry(topRadius, 1.15, 24), accentMat);
@@ -320,41 +297,10 @@ function buildCustom3DRocket(includeFlame) {
         rocket.add(nose);
     }
 
-    // 4. Propulsores laterales según configuración
-    const flames = [];
-    if (cfg.booster.id !== 'boost_standard') {
-        const sideOffsets = (cfg.booster.id === 'boost_heavy' || cfg.booster.id === 'boost_plasma')
-            ? [[-0.98, 0], [0.98, 0], [0, -0.98], [0, 0.98]]
-            : [[-0.98, 0], [0.98, 0]];
-
-        const podMat = cfg.booster.id === 'boost_plasma' ? cyanGlowMat : bodyMat;
-
-        sideOffsets.forEach(([bx, bz]) => {
-            const pod = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.28, 2.1, 16), podMat);
-            pod.position.set(bx, -0.35, bz);
-            rocket.add(pod);
-
-            const podNose = new THREE.Mesh(new THREE.ConeGeometry(0.24, 0.55, 16), accentMat);
-            podNose.position.set(bx, 0.97, bz);
-            rocket.add(podNose);
-
-            if (includeFlame) {
-                const subFlame = new THREE.Mesh(
-                    new THREE.ConeGeometry(0.2, 0.95, 12),
-                    new THREE.MeshBasicMaterial({ color: cfg.booster.id === 'boost_plasma' ? 0xa855f7 : 0x38bdf8 })
-                );
-                subFlame.position.set(bx, -1.8, bz);
-                subFlame.rotation.x = Math.PI;
-                rocket.add(subFlame);
-                flames.push(subFlame);
-            }
-        });
-    }
-
-    // 5. Alas / Estabilizadores según configuración
+    // 3. Alas
     if (cfg.wing.id === 'wing_aero') {
-        [-1.18, 1.18].forEach(wx => {
-            const wing = new THREE.Mesh(new THREE.BoxGeometry(1.35, 0.12, 0.95), accentMat);
+        [-1.22, 1.22].forEach(wx => {
+            const wing = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.12, 0.95), accentMat);
             wing.position.set(wx, -0.6, 0);
             wing.rotation.z = wx > 0 ? -0.25 : 0.25;
             rocket.add(wing);
@@ -384,26 +330,51 @@ function buildCustom3DRocket(includeFlame) {
         }
     }
 
-    // 6. Accesorios externos
-    if (cfg.addon.id === 'addon_antenna') {
-        const dish = new THREE.Mesh(new THREE.CylinderGeometry(0.36, 0.08, 0.25, 16), cyanGlowMat);
-        dish.position.set(0.68, 0.95, 0.35);
-        dish.rotation.z = -0.6;
-        rocket.add(dish);
-    } else if (cfg.addon.id === 'addon_cannons') {
-        [-0.8, 0.8].forEach(cx => {
-            const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 1.35, 12), cyanGlowMat);
-            barrel.position.set(cx, 0.55, 0.45);
-            rocket.add(barrel);
+    // 4. Motores y Humo/Fuego de despegue
+    const flames = [];
+    const smokePuffs = [];
+    const flameMat = new THREE.MeshBasicMaterial({ color: cfg.booster.flameHex });
+    const smokeMat = new THREE.MeshBasicMaterial({ color: cfg.booster.smokeHex, transparent: true, opacity: 0.72 });
+
+    const nozzleCoords = [[0, -1.55, 0]];
+    if (cfg.booster.id !== 'boost_standard') {
+        const sideOffsets = (cfg.booster.id === 'boost_heavy' || cfg.booster.id === 'boost_plasma')
+            ? [[-0.98, 0], [0.98, 0], [0, -0.98], [0, 0.98]]
+            : [[-0.98, 0], [0.98, 0]];
+
+        sideOffsets.forEach(([bx, bz]) => {
+            const pod = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.28, 2.1, 16), bodyMat);
+            pod.position.set(bx, -0.35, bz);
+            rocket.add(pod);
+
+            const podNose = new THREE.Mesh(new THREE.ConeGeometry(0.24, 0.55, 16), accentMat);
+            podNose.position.set(bx, 0.97, bz);
+            rocket.add(podNose);
+
+            nozzleCoords.push([bx, -1.45, bz]);
         });
-    } else if (cfg.addon.id === 'addon_solar') {
-        [-1.68, 1.68].forEach(sx => {
-            const solarPanel = new THREE.Mesh(
-                new THREE.BoxGeometry(1.5, 0.85, 0.06),
-                new THREE.MeshStandardMaterial({ color: 0x1d4ed8, emissive: 0x1e3a8a, emissiveIntensity: 0.45, metalness: 0.8 })
+    }
+
+    if (includeFlame) {
+        nozzleCoords.forEach(([nx, ny, nz], idx) => {
+            const isMain = idx === 0;
+            const flame = new THREE.Mesh(
+                new THREE.ConeGeometry(isMain ? 0.42 : 0.22, isMain ? 1.35 : 0.95, 14),
+                flameMat
             );
-            solarPanel.position.set(sx, 0.25, 0);
-            rocket.add(solarPanel);
+            flame.position.set(nx, ny - 0.55, nz);
+            flame.rotation.x = Math.PI;
+            rocket.add(flame);
+            flames.push(flame);
+
+            // Partículas de humo animado saliendo del motor
+            for (let s = 0; s < 3; s++) {
+                const puff = new THREE.Mesh(new THREE.SphereGeometry(isMain ? 0.24 : 0.14, 10, 10), smokeMat);
+                puff.position.set(nx, ny - 1.2 - s * 0.45, nz);
+                puff.userData = { baseX: nx, baseZ: nz, startY: ny - 1.1, phase: s * 0.33 + idx * 0.17 };
+                rocket.add(puff);
+                smokePuffs.push(puff);
+            }
         });
     }
 
@@ -417,19 +388,28 @@ function buildCustom3DRocket(includeFlame) {
         rocket.add(leg);
     }
 
-    if (includeFlame) {
-        const mainFlame = new THREE.Mesh(
-            new THREE.ConeGeometry(0.45, 1.4, 16),
-            new THREE.MeshBasicMaterial({ color: 0xf59e0b })
-        );
-        mainFlame.position.y = -2.1;
-        mainFlame.rotation.x = Math.PI;
-        rocket.add(mainFlame);
-        flames.unshift(mainFlame);
-    }
-
     rocket.userData.flames = flames;
+    rocket.userData.smokePuffs = smokePuffs;
     return rocket;
+}
+
+function animateRocketExhaust(rocket, dt) {
+    if (!rocket || !rocket.userData) return;
+    if (rocket.userData.flames) {
+        rocket.userData.flames.forEach(f => {
+            f.scale.y = 0.8 + Math.random() * 0.55;
+        });
+    }
+    if (rocket.userData.smokePuffs) {
+        rocket.userData.smokePuffs.forEach(p => {
+            p.userData.phase = (p.userData.phase + dt * 1.8) % 1;
+            const t = p.userData.phase;
+            p.position.y = p.userData.startY - t * 1.65;
+            p.position.x = p.userData.baseX + Math.sin(t * 8) * 0.16;
+            p.position.z = p.userData.baseZ + Math.cos(t * 8) * 0.16;
+            p.scale.setScalar(0.7 + t * 1.35);
+        });
+    }
 }
 
 function createPlayerNameTag(playerName, charName, roleShort, colorCss) {
@@ -463,7 +443,6 @@ function createPlayerNameTag(playerName, charName, roleShort, colorCss) {
     return sprite;
 }
 
-// Genera textura orgánica procedural (plumas, piel con manchas o pelaje realista)
 function createOrganicSkinTexture(type) {
     const canvas = document.createElement('canvas');
     canvas.width = 256;
@@ -487,10 +466,6 @@ function createOrganicSkinTexture(type) {
             ctx.beginPath();
             ctx.arc(Math.random() * 256, Math.random() * 256, 10 + Math.random() * 14, 0, Math.PI * 2);
             ctx.fill();
-        }
-        for (let i = 0; i < 400; i++) {
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
-            ctx.fillRect(Math.random() * 256, Math.random() * 256, 2, 2);
         }
     } else if (type === 'tyrone') {
         ctx.fillStyle = '#f97316';
@@ -519,7 +494,6 @@ function createOrganicSkinTexture(type) {
     return new THREE.CanvasTexture(canvas);
 }
 
-// Crea un ojo realista con esclerótica, iris, pupila y brillo especular
 function createRealisticEye(irisColorHex) {
     const eyeGroup = new THREE.Group();
     const sclera = new THREE.Mesh(
@@ -553,7 +527,6 @@ function createRealisticEye(irisColorHex) {
     return eyeGroup;
 }
 
-// Construye en 3D realista a Pablo, Uniqua (Yonicua), Tyrone o Tasha
 function createBackyardiganCharacter(charId, labelInfo) {
     const group = new THREE.Group();
     const id = charId || 'pablo';
@@ -570,7 +543,6 @@ function createBackyardiganCharacter(charId, labelInfo) {
     const bootMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.6 });
     let propellerMesh = null;
 
-    // 1. Torso y vestimenta según personaje
     if (id === 'pablo') {
         const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.46, 0.5, 0.98, 24), skinMat);
         torso.position.y = 1.32;
@@ -581,7 +553,6 @@ function createBackyardiganCharacter(charId, labelInfo) {
         belly.scale.set(0.9, 1.05, 0.78);
         group.add(belly);
 
-        // Chaleco azul/amarillo de explorador espacial
         const vest = new THREE.Mesh(new THREE.CylinderGeometry(0.49, 0.52, 0.52, 24), new THREE.MeshStandardMaterial({ color: 0x0284c7, roughness: 0.4 }));
         vest.position.y = 1.52;
         group.add(vest);
@@ -606,7 +577,6 @@ function createBackyardiganCharacter(charId, labelInfo) {
         stripe.position.y = 1.38;
         group.add(stripe);
     } else {
-        // Tasha
         const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.47, 0.54, 0.98, 24), skinMat);
         torso.position.y = 1.32;
         group.add(torso);
@@ -616,12 +586,10 @@ function createBackyardiganCharacter(charId, labelInfo) {
         group.add(dress);
     }
 
-    // Mochila de oxígeno compacta en la espalda
     const backpack = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.65, 0.24), whiteMat);
     backpack.position.set(0, 1.45, -0.48);
     group.add(backpack);
 
-    // 2. Cabeza y rasgos faciales detallados
     const headGroup = new THREE.Group();
     headGroup.position.y = 2.34;
     group.add(headGroup);
@@ -637,7 +605,6 @@ function createBackyardiganCharacter(charId, labelInfo) {
     });
 
     if (id === 'pablo') {
-        // Pico naranja-amarillo de pingüino
         const beakMat = new THREE.MeshStandardMaterial({ color: 0xf59e0b, roughness: 0.3 });
         const upperBeak = new THREE.Mesh(new THREE.ConeGeometry(0.18, 0.42, 20), beakMat);
         upperBeak.rotation.x = Math.PI / 2;
@@ -651,7 +618,6 @@ function createBackyardiganCharacter(charId, labelInfo) {
         lowerBeak.position.set(0, -0.12, 0.58);
         headGroup.add(lowerBeak);
 
-        // Gorra azul y amarilla con hélice giratoria
         const cap = new THREE.Mesh(
             new THREE.SphereGeometry(0.36, 20, 14, 0, Math.PI * 2, 0, Math.PI / 2),
             new THREE.MeshStandardMaterial({ color: 0x2563eb, roughness: 0.4 })
@@ -666,9 +632,7 @@ function createBackyardiganCharacter(charId, labelInfo) {
         propHub.add(blade1, blade2);
         headGroup.add(propHub);
         propellerMesh = propHub;
-
     } else if (id === 'uniqua') {
-        // Antenas curvas características de Uniqua
         [-0.22, 0.22].forEach(ax => {
             const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.05, 0.36, 12), skinMat);
             stem.position.set(ax, 0.58, 0);
@@ -679,9 +643,7 @@ function createBackyardiganCharacter(charId, labelInfo) {
             tip.position.set(ax * 1.45, 0.76, 0);
             headGroup.add(tip);
         });
-
     } else if (id === 'tyrone') {
-        // Hocico grande de alce + mechón pelirrojo + astas ramificadas
         const snout = new THREE.Mesh(
             new THREE.SphereGeometry(0.34, 24, 20),
             new THREE.MeshStandardMaterial({ color: 0xfdba74, roughness: 0.45 })
@@ -706,9 +668,7 @@ function createBackyardiganCharacter(charId, labelInfo) {
             palm.rotation.z = side > 0 ? -0.4 : 0.4;
             headGroup.add(palm);
         });
-
     } else {
-        // Tasha: hocico ancho de hipopótamo y orejas redondeadas
         const hippoSnout = new THREE.Mesh(new THREE.SphereGeometry(0.36, 24, 20), skinMat);
         hippoSnout.position.set(0, -0.12, 0.44);
         hippoSnout.scale.set(1.25, 0.82, 1.05);
@@ -728,7 +688,6 @@ function createBackyardiganCharacter(charId, labelInfo) {
         });
     }
 
-    // Cúpula espacial de cristal transparente para que se vea el personaje completo
     const glassDome = new THREE.Mesh(
         new THREE.SphereGeometry(0.76, 28, 28),
         new THREE.MeshStandardMaterial({
@@ -742,7 +701,6 @@ function createBackyardiganCharacter(charId, labelInfo) {
     glassDome.position.y = 0.14;
     headGroup.add(glassDome);
 
-    // 3. Brazos articulados
     function makeArm(side) {
         const armPivot = new THREE.Group();
         armPivot.position.set(side * 0.6, 1.68, 0);
@@ -766,7 +724,6 @@ function createBackyardiganCharacter(charId, labelInfo) {
     const leftArm = makeArm(-1);
     const rightArm = makeArm(1);
 
-    // 4. Piernas articuladas
     function makeLeg(side) {
         const legPivot = new THREE.Group();
         legPivot.position.set(side * 0.24, 0.84, 0);
