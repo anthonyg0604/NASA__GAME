@@ -1,6 +1,6 @@
 let arenaScene, arenaCamera, arenaRenderer, arenaAnimId;
-let arenaPhase = 'flight_out'; // 'flight_out' | 'base_ops' | 'flight_back'
-let arenaKeys = {};
+var arenaPhase = 'flight_out'; // 'flight_out' | 'base_ops' | 'flight_back'
+var arenaKeys = {};
 let arenaLastTime = 0;
 
 // Variables fase de vuelo espacial
@@ -17,20 +17,20 @@ let baseAstroRig = null;
 let baseAstroVelY = 0;
 let baseAstroGrounded = true;
 let remoteBaseAstros = {};
-let baseColliders = []; // { minX, maxX, minZ, maxZ }
+let baseColliders = [];
 let roleTerminals = [];
 let activeTerminal = null;
-let isTaskModalOpen = false;
+var isTaskModalOpen = false;
 let completedTaskIds = new Set();
 let suitOxygen = 90;
 let maxSuitOxygen = 90;
-let baseCamYaw = 0;
-let baseDragging = false;
-let basePrevMouseX = 0;
+var baseCamYaw = 0;
+let botTaskTimer = 0;
 
 function startPhoraArena() {
     const container = document.getElementById('arena-container');
     container.classList.remove('hidden');
+    resetAllInputStates();
 
     const mission = GAME_STATE.selectedMission;
     const role = GAME_STATE.selectedRole;
@@ -40,11 +40,14 @@ function startPhoraArena() {
     shipShield = maxShipShield;
     flightProgress = 0;
 
-    maxSuitOxygen = 75 + stats.o2Bonus;
+    maxSuitOxygen = 85 + stats.o2Bonus;
     suitOxygen = maxSuitOxygen;
     completedTaskIds = new Set();
     isTaskModalOpen = false;
     activeTerminal = null;
+    botTaskTimer = 0;
+
+    MP.resetMissionTaskState();
 
     document.getElementById('arena-role-badge').innerText = `ROL: ${role.short.toUpperCase()}`;
     document.getElementById('samples-counter').innerText = `📋 Tareas ${role.short}: 0 / ${role.tasks.length}`;
@@ -58,6 +61,21 @@ function setupArenaEvents() {
 
     window.onkeydown = e => {
         if (document.getElementById('arena-container').classList.contains('hidden')) return;
+
+        if (e.code === 'Escape') {
+            if (isTaskModalOpen) {
+                closeTaskModal();
+                return;
+            }
+            if (!isAnyGameModalOpen() && !document.pointerLockElement && arenaPhase === 'base_ops') {
+                if (performance.now() - lastPointerUnlockAt > 160) {
+                    lockGamePointer();
+                }
+            }
+            return;
+        }
+
+        if (isAnyGameModalOpen()) return;
         arenaKeys[e.code] = true;
 
         if (arenaPhase === 'base_ops' && !isTaskModalOpen) {
@@ -66,11 +84,11 @@ function setupArenaEvents() {
                 baseAstroGrounded = false;
             }
             if (e.code === 'KeyE' && activeTerminal && !completedTaskIds.has(activeTerminal.id)) {
-                openTaskMinigame(activeTerminal);
+                const lockInfo = getTaskLockInfo(GAME_STATE.selectedRole.id, activeTerminal.taskIndex);
+                if (!lockInfo.locked) {
+                    openTaskMinigame(activeTerminal);
+                }
             }
-        }
-        if (e.code === 'Escape' && isTaskModalOpen) {
-            closeTaskModal();
         }
     };
 
@@ -79,24 +97,18 @@ function setupArenaEvents() {
     };
 
     webglHolder.onmousedown = e => {
-        baseDragging = true;
-        basePrevMouseX = e.clientX;
-    };
-
-    window.onmousemove = e => {
-        if (!baseDragging || isTaskModalOpen || arenaPhase !== 'base_ops') return;
-        const dx = e.clientX - basePrevMouseX;
-        basePrevMouseX = e.clientX;
-        baseCamYaw -= dx * 0.0065;
-    };
-
-    window.onmouseup = () => {
-        baseDragging = false;
+        if (e.button === 2) return;
+        if (!isAnyGameModalOpen() && arenaPhase === 'base_ops') {
+            lockGamePointer();
+        }
     };
 
     document.getElementById('arena-interact-prompt').onclick = () => {
         if (activeTerminal && !isTaskModalOpen && !completedTaskIds.has(activeTerminal.id)) {
-            openTaskMinigame(activeTerminal);
+            const lockInfo = getTaskLockInfo(GAME_STATE.selectedRole.id, activeTerminal.taskIndex);
+            if (!lockInfo.locked) {
+                openTaskMinigame(activeTerminal);
+            }
         }
     };
 
@@ -117,6 +129,7 @@ function stopArenaLoop() {
 
 function resetArenaRenderer() {
     stopArenaLoop();
+    resetAllInputStates();
     const holder = document.getElementById('arena-webgl-container');
     holder.innerHTML = '';
 
@@ -126,6 +139,69 @@ function resetArenaRenderer() {
     arenaRenderer.setSize(holder.clientWidth, holder.clientHeight);
     arenaRenderer.shadowMap.enabled = true;
     holder.appendChild(arenaRenderer.domElement);
+}
+
+// =========================================================================
+// COOPERACIÓN DINÁMICA SEGÚN JUGADORES EN SALA (1, 2, 3 O 4 ROLES)
+// =========================================================================
+function getTaskLockInfo(roleId, taskIndex) {
+    // Solo la Tarea 2 (índice 1) depende de que otro jugador activo complete su Tarea 1 (índice 0)
+    if (taskIndex !== 1) return { locked: false };
+
+    const activeRoles = MP.getActiveRolesInMatch();
+    // Si hay 1 solo jugador, nunca se bloquea ninguna tarea
+    if (activeRoles.length <= 1) return { locked: false };
+
+    const myIdx = activeRoles.indexOf(roleId);
+    if (myIdx === -1) return { locked: false };
+
+    // Depende del jugador activo anterior en la lista (funciona para 2, 3 o 4 roles)
+    const partnerIdx = (myIdx - 1 + activeRoles.length) % activeRoles.length;
+    const partnerRoleId = activeRoles[partnerIdx];
+    const partnerRole = GAME_DATA.roles.find(r => r.id === partnerRoleId);
+    if (!partnerRole) return { locked: false };
+
+    const requiredTask = partnerRole.tasks[0];
+    const partnerDoneList = MP.completedTasksByRole[partnerRoleId] || [];
+    const isPartnerDone = partnerDoneList.includes(requiredTask.id);
+
+    if (isPartnerDone) {
+        return { locked: false };
+    }
+
+    return {
+        locked: true,
+        partnerRoleName: partnerRole.short,
+        partnerTaskTitle: requiredTask.title
+    };
+}
+
+function onRemoteTaskStateUpdated() {
+    if (arenaPhase !== 'base_ops') return;
+    refreshTerminalsVisualState();
+    updateBaseCompassHint();
+}
+
+function refreshTerminalsVisualState() {
+    const role = GAME_STATE.selectedRole;
+    roleTerminals.forEach(t => {
+        if (completedTaskIds.has(t.id)) {
+            t.screenMat.color.setHex(0x10b981);
+            t.screenMat.emissive.setHex(0x10b981);
+            t.beacon.visible = false;
+            return;
+        }
+        const lockInfo = getTaskLockInfo(role.id, t.taskIndex);
+        if (lockInfo.locked) {
+            t.screenMat.color.setHex(0xef4444);
+            t.screenMat.emissive.setHex(0x991b1b);
+            t.beacon.material.color.setHex(0xef4444);
+        } else {
+            t.screenMat.color.setHex(role.colorHex);
+            t.screenMat.emissive.setHex(role.colorHex);
+            t.beacon.material.color.setHex(role.colorHex);
+        }
+    });
 }
 
 // =========================================================================
@@ -162,7 +238,6 @@ function initFlightPhase(phaseType) {
     document.getElementById('secondary-bar-fill').style.width = '0%';
     document.getElementById('arena-hint').innerHTML = 'Usa <b>W A S D</b> o <b>Flechas</b> para pilotar la nave y esquivar los meteoritos';
 
-    // Campo de estrellas
     const starGeo = new THREE.BufferGeometry();
     const verts = [];
     for (let i = 0; i < 900; i++) {
@@ -172,19 +247,16 @@ function initFlightPhase(phaseType) {
     starField = new THREE.Points(starGeo, new THREE.PointsMaterial({ color: 0xffffff, size: 0.28 }));
     arenaScene.add(starField);
 
-    // Planeta destino lejano que se acerca
     targetPlanetObj = createHDPlanet(isReturn ? 'earth' : mission.id, 18);
     targetPlanetObj.group.position.set(0, 6, -125);
     arenaScene.add(targetPlanetObj.group);
 
-    // Cohete personalizado
     flightRocket = buildCustom3DRocket(true);
     flightRocket.rotation.x = -Math.PI / 2;
     flightRocket.scale.setScalar(0.75);
     flightRocket.position.set(0, 0, 4);
     arenaScene.add(flightRocket);
 
-    // Meteoritos
     const rockCount = mission.asteroidCount + (isReturn ? 3 : 0);
     const rockMat = new THREE.MeshStandardMaterial({ color: 0x64748b, roughness: 0.85, metalness: 0.15 });
     for (let i = 0; i < rockCount; i++) {
@@ -234,7 +306,6 @@ function animateFlightPhase(now) {
         animateRocketExhaust(flightRocket, dt);
     }
 
-    // Avance de viaje
     flightProgress += dt * 7.8 * stats.speedMult;
     const pct = Math.min(100, Math.round(flightProgress));
     const isReturn = arenaPhase === 'flight_back';
@@ -249,7 +320,6 @@ function animateFlightPhase(now) {
         targetPlanetObj.sphere.rotation.y += dt * 0.25;
     }
 
-    // Mover estrellas y meteoritos
     const posArr = starField.geometry.attributes.position.array;
     for (let i = 2; i < posArr.length; i += 3) {
         posArr[i] += 48 * dt * stats.speedMult;
@@ -276,6 +346,7 @@ function animateFlightPhase(now) {
 
                 if (shipShield <= 0) {
                     stopArenaLoop();
+                    unlockGamePointer();
                     showMissionReport(false, 'El escudo de la nave llegó al 0% por impacto de meteoritos. Mejora tu blindaje en el Taller de Nave.');
                     return;
                 }
@@ -294,6 +365,7 @@ function animateFlightPhase(now) {
         if (arenaPhase === 'flight_out') {
             initPlanetaryBasePhase();
         } else {
+            unlockGamePointer();
             const reward = GAME_STATE.selectedMission.rewardCredits;
             GAME_STATE.credits += reward;
             GAME_STATE.saveProgress();
@@ -306,7 +378,7 @@ function animateFlightPhase(now) {
 }
 
 // =========================================================================
-// FASE 2: BASE PLANETARIA CERRADA 68x68 (9 SALAS, TECHO ALTO 11m, SIN TRANSPARENCIAS)
+// FASE 2: BASE PLANETARIA CERRADA 68x68 (9 SALAS, TECHO ALTO 11m)
 // =========================================================================
 function initPlanetaryBasePhase() {
     arenaPhase = 'base_ops';
@@ -332,7 +404,6 @@ function initPlanetaryBasePhase() {
     document.getElementById('secondary-bar-fill').className = 'progress-fill cyan';
     document.getElementById('secondary-bar-fill').style.width = '0%';
 
-    // Iluminación interior amplia para las 9 salas
     arenaScene.add(new THREE.AmbientLight(0xcbd5e1, 0.85));
 
     const roomCoords = [-22.5, 0, 22.5];
@@ -342,7 +413,6 @@ function initPlanetaryBasePhase() {
             pLight.position.set(rx, 8.8, rz);
             arenaScene.add(pLight);
 
-            // Luminaria en el techo alto (y = 10.7)
             const lamp = new THREE.Mesh(
                 new THREE.BoxGeometry(3.6, 0.25, 3.6),
                 new THREE.MeshBasicMaterial({ color: 0xe0f2fe })
@@ -354,8 +424,8 @@ function initPlanetaryBasePhase() {
 
     buildClosed9RoomComplex(mission);
     buildRoleSpecificTerminals(role);
+    refreshTerminalsVisualState();
 
-    // Astronauta del jugador en el centro de la sala central (0, 0, 0)
     const char = GAME_DATA.characters.find(c => c.id === GAME_STATE.selectedCharacterId) || GAME_DATA.characters[0];
     baseAstroRig = createBackyardiganCharacter(char.id, {
         name: MP.myName,
@@ -367,6 +437,7 @@ function initPlanetaryBasePhase() {
     arenaScene.add(baseAstroRig.group);
 
     updateBaseCompassHint();
+    lockGamePointer();
 
     arenaLastTime = performance.now();
     animatePlanetaryBase();
@@ -382,7 +453,6 @@ function addSolidWallBox(cx, cz, widthX, depthZ, heightY, wallMat, trimMat) {
     wall.receiveShadow = true;
     arenaScene.add(wall);
 
-    // Franja neón inferior para visibilidad espacial
     if (trimMat) {
         const trim = new THREE.Mesh(
             new THREE.BoxGeometry(widthX + 0.06, 0.25, depthZ + 0.06),
@@ -401,10 +471,9 @@ function addSolidWallBox(cx, cz, widthX, depthZ, heightY, wallMat, trimMat) {
 }
 
 function buildClosed9RoomComplex(mission) {
-    const WALL_H = 11.0; // Techo alto de 11 metros
-    const WALL_T = 1.4;  // Paredes gruesas 100% opacas
+    const WALL_H = 11.0;
+    const WALL_T = 1.4;
 
-    // Suelo principal 68 x 68 (de -34 a +34)
     const floor = new THREE.Mesh(
         new THREE.PlaneGeometry(68, 68),
         new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.45, metalness: 0.25 })
@@ -417,7 +486,6 @@ function buildClosed9RoomComplex(mission) {
     grid.position.y = 0.01;
     arenaScene.add(grid);
 
-    // Techo sólido cerrado a y = 11.0 (nadie puede ver hacia afuera ni atravesar paredes)
     const ceiling = new THREE.Mesh(
         new THREE.BoxGeometry(70, 0.8, 70),
         new THREE.MeshStandardMaterial({ color: 0x091122, roughness: 0.7, side: THREE.DoubleSide })
@@ -429,14 +497,11 @@ function buildClosed9RoomComplex(mission) {
     const innerWallMat = new THREE.MeshStandardMaterial({ color: 0x263349, roughness: 0.5, metalness: 0.2 });
     const trimMat = new THREE.MeshBasicMaterial({ color: mission.accentColor });
 
-    // 4 Paredes Exteriores Sólidas (Norte z=-34, Sur z=34, Oeste x=-34, Este x=34)
     addSolidWallBox(0, -34.2, 69.8, WALL_T, WALL_H, outerWallMat, trimMat);
     addSolidWallBox(0, 34.2, 69.8, WALL_T, WALL_H, outerWallMat, trimMat);
     addSolidWallBox(-34.2, 0, WALL_T, 69.8, WALL_H, outerWallMat, trimMat);
     addSolidWallBox(34.2, 0, WALL_T, 69.8, WALL_H, outerWallMat, trimMat);
 
-    // Divisiones Interiores en cuadrícula 3x3 (en x = -11, x = +11 y z = -11, z = +11)
-    // Con puertas amplias de 5.2m centradas en -22.5, 0 y +22.5
     const doorCenters = [-22.5, 0, 22.5];
     const doorHalf = 2.6;
 
@@ -453,7 +518,6 @@ function buildClosed9RoomComplex(mission) {
                     addSolidWallBox(segCenter, fixedCoord, segLen, 1.1, WALL_H, innerWallMat, trimMat);
                 }
             }
-            // Dintel superior sobre la puerta (de y=4.6 a y=11.0)
             const lintel = new THREE.Mesh(
                 isVerticalWall
                     ? new THREE.BoxGeometry(1.1, WALL_H - 4.6, doorHalf * 2)
@@ -486,7 +550,6 @@ function buildClosed9RoomComplex(mission) {
     buildWallWithDoorways(false, -11);
     buildWallWithDoorways(false, 11);
 
-    // Letreros identificadores de las 9 salas del complejo
     const roomSigns = [
         { text: 'CAFETERÍA CENTRAL', x: 0, z: 0 },
         { text: 'PUENTE DE NAVEGACIÓN (NORTE)', x: 0, z: -22.5 },
@@ -510,7 +573,7 @@ function buildClosed9RoomComplex(mission) {
 function buildRoleSpecificTerminals(role) {
     roleTerminals = [];
 
-    role.tasks.forEach(task => {
+    role.tasks.forEach((task, taskIndex) => {
         const group = new THREE.Group();
         group.position.set(task.x, 0, task.z);
         group.rotation.y = task.rotY || 0;
@@ -532,7 +595,6 @@ function buildRoleSpecificTerminals(role) {
         screen.rotation.x = -0.25;
         group.add(screen);
 
-        // Baliza vertical luminosa para localizar el objetivo en la sala
         const beacon = new THREE.Mesh(
             new THREE.CylinderGeometry(0.18, 0.45, 9.5, 16, 1, true),
             new THREE.MeshBasicMaterial({
@@ -550,7 +612,7 @@ function buildRoleSpecificTerminals(role) {
         group.add(label);
 
         arenaScene.add(group);
-        roleTerminals.push({ ...task, group, screenMat, beacon });
+        roleTerminals.push({ ...task, taskIndex, group, screenMat, beacon });
     });
 }
 
@@ -564,8 +626,16 @@ function updateBaseCompassHint() {
         return;
     }
 
-    const nextTask = pending[0];
-    hintEl.innerHTML = `🎯 Objetivo pendiente (${pending.length}): <b>${nextTask.title}</b> en <b>${nextTask.roomName}</b> • <b>[E]</b> Operar`;
+    const myRoleId = GAME_STATE.selectedRole.id;
+    const unlockedTask = pending.find(t => !getTaskLockInfo(myRoleId, t.taskIndex).locked);
+
+    if (unlockedTask) {
+        hintEl.innerHTML = `🎯 Objetivo disponible (${pending.length}): <b>${unlockedTask.title}</b> en <b>${unlockedTask.roomName}</b> • <b>[E]</b> Operar`;
+    } else {
+        const blocked = pending[0];
+        const lockInfo = getTaskLockInfo(myRoleId, blocked.taskIndex);
+        hintEl.innerHTML = `🔒 <b>${blocked.title}</b> espera a que <b>${lockInfo.partnerRoleName}</b> complete su Tarea 1`;
+    }
 }
 
 function resolveBaseWallCollisions(pos) {
@@ -590,12 +660,10 @@ function resolveBaseWallCollisions(pos) {
 }
 
 function clampBaseCameraInsideWalls(camPos, targetPos) {
-    // Mantener la cámara siempre debajo del techo (y = 11) y dentro de las paredes exteriores
     camPos.y = Math.min(9.2, Math.max(1.8, camPos.y));
     camPos.x = Math.max(-32.6, Math.min(32.6, camPos.x));
     camPos.z = Math.max(-32.6, Math.min(32.6, camPos.z));
 
-    // Evitar que la cámara cruce muros interiores entre el personaje y la lente
     const steps = 8;
     for (let s = 1; s <= steps; s++) {
         const t = s / steps;
@@ -615,6 +683,25 @@ function clampBaseCameraInsideWalls(camPos, targetPos) {
 
 function syncBaseRemoteAstronauts(elapsed, dt) {
     MP.updateBots(dt, 28);
+
+    // Si el anfitrión juega con bots IA, los bots completan sus tareas periódicamente para desbloquear cooperación
+    if (MP.isHost) {
+        botTaskTimer += dt;
+        if (botTaskTimer >= 9) {
+            botTaskTimer = 0;
+            Object.values(MP.players).forEach(p => {
+                if (!p.isBot) return;
+                const botRole = GAME_DATA.roles.find(r => r.id === p.roleId);
+                if (!botRole) return;
+                const doneList = MP.completedTasksByRole[botRole.id] || [];
+                const nextBotTask = botRole.tasks.find(t => !doneList.includes(t.id));
+                if (nextBotTask) {
+                    MP.reportTaskCompleted(botRole.id, nextBotTask.id);
+                    onRemoteTaskStateUpdated();
+                }
+            });
+        }
+    }
 
     const activeIds = new Set();
     Object.values(MP.players).forEach(p => {
@@ -674,7 +761,6 @@ function animatePlanetaryBase(now) {
     arenaLastTime = tNow;
     const elapsed = tNow * 0.001;
 
-    // Consumo de oxígeno del traje
     if (!isTaskModalOpen) {
         suitOxygen = Math.max(0, suitOxygen - dt);
         const o2Pct = Math.round((suitOxygen / maxSuitOxygen) * 100);
@@ -685,6 +771,7 @@ function animatePlanetaryBase(now) {
         }
         if (suitOxygen <= 0) {
             stopArenaLoop();
+            unlockGamePointer();
             showMissionReport(false, 'Se agotó el oxígeno de tu traje espacial en la base. Equipa alas o fuselaje de largo alcance para mayor reserva.');
             return;
         }
@@ -760,7 +847,6 @@ function animatePlanetaryBase(now) {
             moving
         );
 
-        // Detectar terminal de misión cercana
         let nearest = null;
         let minDist = 3.2;
         roleTerminals.forEach(t => {
@@ -775,13 +861,17 @@ function animatePlanetaryBase(now) {
 
         const promptBtn = document.getElementById('arena-interact-prompt');
         if (activeTerminal && !isTaskModalOpen) {
-            document.getElementById('arena-task-name').innerText = activeTerminal.title;
+            const lockInfo = getTaskLockInfo(GAME_STATE.selectedRole.id, activeTerminal.taskIndex);
+            if (lockInfo.locked) {
+                promptBtn.innerHTML = `🔒 Bloqueado: Espera a que <strong>${lockInfo.partnerRoleName}</strong> complete <em>${lockInfo.partnerTaskTitle}</em>`;
+            } else {
+                promptBtn.innerHTML = `Presiona <strong>[E]</strong> o haz clic para operar: <span id="arena-task-name">${activeTerminal.title}</span>`;
+            }
             promptBtn.classList.remove('hidden');
         } else {
             promptBtn.classList.add('hidden');
         }
 
-        // Cámara tercera persona dentro de la base (sin atravesar paredes ni techo)
         const camDist = 6.2;
         const rawCam = new THREE.Vector3(
             baseAstroRig.group.position.x + Math.sin(baseCamYaw) * camDist,
@@ -803,18 +893,21 @@ function animatePlanetaryBase(now) {
 }
 
 // =========================================================================
-// MINIJUEGOS INTERACTIVOS POR ROL (6 MECÁNICAS DISTINTAS)
+// MINIJUEGOS CON VERIFICACIÓN CIENTÍFICA NASA CORTA
 // =========================================================================
 function closeTaskModal() {
     isTaskModalOpen = false;
+    resetAllInputStates();
     document.getElementById('planet-task-modal').classList.add('hidden');
+    if (arenaPhase === 'base_ops') {
+        lockGamePointer();
+    }
 }
 
 function completeCurrentTask(task) {
     completedTaskIds.add(task.id);
-    task.screenMat.color.setHex(0x10b981);
-    task.screenMat.emissive.setHex(0x10b981);
-    task.beacon.visible = false;
+    MP.reportTaskCompleted(GAME_STATE.selectedRole.id, task.id);
+    refreshTerminalsVisualState();
 
     const total = GAME_STATE.selectedRole.tasks.length;
     const done = completedTaskIds.size;
@@ -837,6 +930,9 @@ function completeCurrentTask(task) {
 
 function openTaskMinigame(task) {
     isTaskModalOpen = true;
+    resetAllInputStates();
+    unlockGamePointer();
+
     const modal = document.getElementById('planet-task-modal');
     const title = document.getElementById('task-modal-title');
     const body = document.getElementById('task-modal-body');
@@ -844,13 +940,45 @@ function openTaskMinigame(task) {
     title.innerText = `${task.title} — ${task.roomName}`;
     modal.classList.remove('hidden');
 
+    // Paso 1: Dato real de la NASA en 1 línea + pregunta rápida de 1 clic
+    body.innerHTML = `
+        <div class="minigame-box">
+            <div style="background:rgba(56,189,248,0.14); border:1px solid #38bdf8; border-radius:10px; padding:10px 12px; margin-bottom:12px; font-size:0.86rem; color:#e0f2fe;">
+                🛰️ <strong>Dato NASA:</strong> ${task.nasaFact}
+            </div>
+            <p style="font-weight:700; color:#f8fafc; margin-bottom:10px; font-size:0.95rem;">
+                ${task.nasaQuestion}
+            </p>
+            <div style="display:flex; flex-direction:column; gap:8px;">
+                ${task.nasaOptions.map((opt, idx) => `
+                    <button class="option-card nasa-opt-btn" data-opt="${idx}" style="text-align:center; font-weight:600;">
+                        ${opt}
+                    </button>
+                `).join('')}
+            </div>
+            <p id="nasa-quiz-msg" style="color:#fbbf24; font-weight:600; margin-top:10px; min-height:20px;"></p>
+        </div>
+    `;
+
+    body.querySelectorAll('.nasa-opt-btn').forEach(btn => {
+        btn.onclick = () => {
+            const chosen = parseInt(btn.dataset.opt, 10);
+            if (chosen === task.correctIdx) {
+                renderTerminalControlStep(task, body);
+            } else {
+                document.getElementById('nasa-quiz-msg').innerText = '⚠️ Respuesta incorrecta. Revisa el dato NASA arriba e intenta otra opción.';
+            }
+        };
+    });
+}
+
+function renderTerminalControlStep(task, body) {
     if (task.type === 'sequence') {
-        // Minijuego 1: Secuencia numérica ascendente 1 -> 4
         const nums = [1, 2, 3, 4].sort(() => Math.random() - 0.5);
         let expected = 1;
         body.innerHTML = `
             <div class="minigame-box">
-                <p style="color:#cbd5e1;">Pulsa los nodos de calibración en orden ascendente (<strong>1 → 2 → 3 → 4</strong>):</p>
+                <p style="color:#cbd5e1;">Pulsa los nodos en orden ascendente (<strong>1 → 2 → 3 → 4</strong>):</p>
                 <div class="seq-grid">
                     ${nums.map(n => `<button class="seq-btn" data-num="${n}">${n}</button>`).join('')}
                 </div>
@@ -863,9 +991,7 @@ function openTaskMinigame(task) {
                 if (val === expected) {
                     btn.classList.add('done');
                     expected++;
-                    if (expected > 4) {
-                        completeCurrentTask(task);
-                    }
+                    if (expected > 4) completeCurrentTask(task);
                 } else {
                     expected = 1;
                     body.querySelectorAll('.seq-btn').forEach(b => b.classList.remove('done'));
@@ -875,10 +1001,9 @@ function openTaskMinigame(task) {
         });
 
     } else if (task.type === 'timing') {
-        // Minijuego 2: Detener cursor en zona verde
         body.innerHTML = `
             <div class="minigame-box">
-                <p style="color:#cbd5e1;">Detén el estabilizador cuando el cursor azul esté dentro de la <strong>zona verde central</strong>:</p>
+                <p style="color:#cbd5e1;">Detén el cursor azul dentro de la <strong>zona verde central</strong>:</p>
                 <div class="drill-meter">
                     <div class="drill-target-zone"></div>
                     <div class="drill-cursor" id="timing-cursor" style="left:10%;"></div>
@@ -908,11 +1033,10 @@ function openTaskMinigame(task) {
         };
 
     } else if (task.type === 'slider') {
-        // Minijuego 3: Sintonizador de frecuencia / presión exacta
         const targetVal = Math.floor(25 + Math.random() * 55);
         body.innerHTML = `
             <div class="minigame-box">
-                <p style="color:#cbd5e1;">Ajusta el dial hasta alcanzar la lectura objetivo: <strong style="color:#10b981; font-size:1.15rem;">${targetVal}.0 MHz</strong></p>
+                <p style="color:#cbd5e1;">Ajusta el dial hasta alcanzar <strong style="color:#10b981; font-size:1.15rem;">${targetVal}.0 MHz</strong>:</p>
                 <input type="range" id="freq-slider" min="10" max="90" value="50" style="width:100%; margin:20px 0; accent-color:#38bdf8;">
                 <div style="font-size:1.3rem; font-weight:800; color:#38bdf8; margin-bottom:12px;">Lectura Actual: <span id="freq-readout">50</span>.0 MHz</div>
                 <button id="freq-confirm-btn" class="btn-primary">📡 BLOQUEAR FRECUENCIA</button>
@@ -927,12 +1051,11 @@ function openTaskMinigame(task) {
             if (diff <= 2) {
                 completeCurrentTask(task);
             } else {
-                document.getElementById('freq-msg').innerText = `⚠️ Desviación detectada (acércate más a ${targetVal}.0 MHz).`;
+                document.getElementById('freq-msg').innerText = `⚠️ Acércate más a ${targetVal}.0 MHz.`;
             }
         };
 
     } else if (task.type === 'wires') {
-        // Minijuego 4: Conexión de cables de colores
         const wires = [
             { id: 'red', label: 'Bus Rojo', color: '#ef4444' },
             { id: 'blue', label: 'Bus Azul', color: '#3b82f6' },
@@ -974,9 +1097,7 @@ function openTaskMinigame(task) {
                         btn.classList.add('connected');
                         selectedLeft = null;
                         connectedCount++;
-                        if (connectedCount >= 4) {
-                            completeCurrentTask(task);
-                        }
+                        if (connectedCount >= 4) completeCurrentTask(task);
                     } else {
                         selectedLeft.classList.remove('active');
                         selectedLeft = null;
@@ -986,12 +1107,11 @@ function openTaskMinigame(task) {
         });
 
     } else if (task.type === 'temp') {
-        // Minijuego 5: Regulador térmico criogénico
         let currentTemp = -12;
         const targetTemp = -45;
         body.innerHTML = `
             <div class="minigame-box">
-                <p style="color:#cbd5e1;">Estabiliza la cámara criogénica exactamente a <strong style="color:#38bdf8;">${targetTemp}°C</strong>:</p>
+                <p style="color:#cbd5e1;">Estabiliza la cámara criogénica a <strong style="color:#38bdf8;">${targetTemp}°C</strong>:</p>
                 <div class="temp-controls">
                     <button class="temp-btn" id="temp-down" style="background:#0284c7;">❄️ -11°C</button>
                     <div id="temp-display" style="font-size:1.8rem; font-weight:800; min-width:110px;">${currentTemp}°C</div>
@@ -1010,13 +1130,10 @@ function openTaskMinigame(task) {
             disp.innerText = `${currentTemp}°C`;
         };
         document.getElementById('temp-confirm').onclick = () => {
-            if (Math.abs(currentTemp - targetTemp) <= 3) {
-                completeCurrentTask(task);
-            }
+            if (Math.abs(currentTemp - targetTemp) <= 3) completeCurrentTask(task);
         };
 
     } else {
-        // Minijuego 6 ('rivets'): Sellar 5 remaches de compuerta presurizada
         const spots = [
             { top: '18%', left: '15%' },
             { top: '22%', left: '75%' },
@@ -1027,7 +1144,7 @@ function openTaskMinigame(task) {
         let sealed = 0;
         body.innerHTML = `
             <div class="minigame-box">
-                <p style="color:#cbd5e1;">Haz clic en los <strong>5 puntos rojos de fuga</strong> para soldar y presurizar la compuerta:</p>
+                <p style="color:#cbd5e1;">Haz clic en los <strong>5 puntos rojos</strong> para soldar la compuerta:</p>
                 <div class="rivet-panel">
                     ${spots.map((s, i) => `<button class="rivet-spot" data-idx="${i}" style="top:${s.top}; left:${s.left};">!</button>`).join('')}
                 </div>
@@ -1039,15 +1156,14 @@ function openTaskMinigame(task) {
                 btn.classList.add('sealed');
                 btn.innerText = '✓';
                 sealed++;
-                if (sealed >= spots.length) {
-                    completeCurrentTask(task);
-                }
+                if (sealed >= spots.length) completeCurrentTask(task);
             };
         });
     }
 }
 
 function showMissionReport(success, message) {
+    unlockGamePointer();
     const modal = document.getElementById('report-modal');
     const title = document.getElementById('report-title');
     const desc = document.getElementById('report-desc');
