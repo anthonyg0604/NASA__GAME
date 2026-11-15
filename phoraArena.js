@@ -3,7 +3,7 @@ var arenaPhase = 'flight_out'; // 'flight_out' | 'base_ops' | 'flight_back'
 var arenaKeys = {};
 let arenaLastTime = 0;
 
-// Variables fase de vuelo espacial
+// Fase de vuelo espacial
 let flightRocket = null;
 let targetPlanetObj = null;
 let asteroids = [];
@@ -12,25 +12,28 @@ let shipShield = 100;
 let maxShipShield = 100;
 let flightProgress = 0;
 
-// Variables fase complejo espacial 114x114 (25 sectores tipo Backrooms)
+// Fase complejo espacial 6x6 (144x144 unidades con pasillos largos y habitaciones)
 let baseAstroRig = null;
 let baseAstroVelY = 0;
 let baseAstroGrounded = true;
 let remoteBaseAstros = {};
 let baseColliders = [];
+let radarWallSegments = [];
 let roleTerminals = [];
+let activeMissionTasks = [];
 let flickeringLights = [];
 let activeTerminal = null;
 var isTaskModalOpen = false;
 let completedTaskIds = new Set();
-let suitOxygen = 135;
-let maxSuitOxygen = 135;
+let suitOxygen = 110;
+let maxSuitOxygen = 110;
 var baseCamYaw = 0;
 let botTaskTimer = 0;
 
 function startPhoraArena() {
     const container = document.getElementById('arena-container');
     container.classList.remove('hidden');
+    document.getElementById('cc-controls-bar').classList.add('hidden');
     resetAllInputStates();
 
     const role = GAME_STATE.selectedRole;
@@ -40,17 +43,24 @@ function startPhoraArena() {
     shipShield = maxShipShield;
     flightProgress = 0;
 
-    maxSuitOxygen = 135 + stats.o2Bonus;
+    // El oxígeno total se inicializa UNA SOLA VEZ al iniciar la misión y NUNCA se regenera al terminar tareas
+    maxSuitOxygen = 115 + stats.o2Bonus;
     suitOxygen = maxSuitOxygen;
     completedTaskIds = new Set();
     isTaskModalOpen = false;
     activeTerminal = null;
     botTaskTimer = 0;
 
+    activeMissionTasks = getMissionTasksForRole(
+        GAME_STATE.selectedMission.id,
+        role.id,
+        MP.roomCode
+    );
+
     MP.resetMissionTaskState();
 
     document.getElementById('arena-role-badge').innerText = `ROL: ${role.short.toUpperCase()}`;
-    document.getElementById('samples-counter').innerText = `📋 Tareas ${role.short}: 0 / ${role.tasks.length}`;
+    document.getElementById('samples-counter').innerText = `📋 Tareas ${role.short}: 0 / ${activeMissionTasks.length}`;
 
     setupArenaEvents();
     initFlightPhase('flight_out');
@@ -80,7 +90,7 @@ function setupArenaEvents() {
 
         if (arenaPhase === 'base_ops' && !isTaskModalOpen) {
             if (e.code === 'Space' && baseAstroGrounded) {
-                baseAstroVelY = 0.25;
+                baseAstroVelY = 0.22;
                 baseAstroGrounded = false;
             }
             if (e.code === 'KeyE' && activeTerminal && !completedTaskIds.has(activeTerminal.id)) {
@@ -134,7 +144,7 @@ function resetArenaRenderer() {
     holder.innerHTML = '';
 
     arenaScene = new THREE.Scene();
-    arenaCamera = new THREE.PerspectiveCamera(58, holder.clientWidth / holder.clientHeight, 0.1, 180);
+    arenaCamera = new THREE.PerspectiveCamera(58, holder.clientWidth / holder.clientHeight, 0.1, 190);
     arenaRenderer = new THREE.WebGLRenderer({ antialias: true });
     arenaRenderer.setSize(holder.clientWidth, holder.clientHeight);
     arenaRenderer.shadowMap.enabled = true;
@@ -142,21 +152,17 @@ function resetArenaRenderer() {
 }
 
 // =========================================================================
-// COOPERACIÓN DINÁMICA PARA 5 MISIONES (1, 2, 3 O 4 JUGADORES + DESCONEXIONES)
+// COOPERACIÓN DINÁMICA (1, 2, 3 O 4 JUGADORES + DESCONEXIONES)
 // =========================================================================
 function getTaskLockInfo(roleId, taskIndex) {
-    // Misiones 1, 3 y 5 (índices 0, 2, 4) siempre son independientes.
-    // Misión 2 (índice 1) y Misión 4 (índice 3) requieren cooperación si hay >= 2 roles activos.
     if (taskIndex !== 1 && taskIndex !== 3) return { locked: false };
 
     const activeRoles = MP.getActiveRolesInMatch();
-    // Si solo queda 1 jugador (o se desconectaron los demás), nada se bloquea
     if (activeRoles.length <= 1) return { locked: false };
 
     const myIdx = activeRoles.indexOf(roleId);
     if (myIdx === -1) return { locked: false };
 
-    // Rotar dependencia entre los jugadores activos actuales
     const partnerIdx = taskIndex === 1
         ? (myIdx - 1 + activeRoles.length) % activeRoles.length
         : (myIdx + 1) % activeRoles.length;
@@ -167,12 +173,12 @@ function getTaskLockInfo(roleId, taskIndex) {
     const partnerRole = GAME_DATA.roles.find(r => r.id === partnerRoleId);
     if (!partnerRole) return { locked: false };
 
+    const partnerTasks = getMissionTasksForRole(GAME_STATE.selectedMission.id, partnerRoleId, MP.roomCode);
     const requiredTaskIndex = taskIndex === 1 ? 0 : 2;
-    const requiredTask = partnerRole.tasks[requiredTaskIndex];
+    const requiredTask = partnerTasks[requiredTaskIndex];
     const partnerDoneList = MP.completedTasksByRole[partnerRoleId] || [];
-    const isPartnerDone = partnerDoneList.includes(requiredTask.id);
 
-    if (isPartnerDone) {
+    if (partnerDoneList.includes(requiredTask.id)) {
         return { locked: false };
     }
 
@@ -213,13 +219,14 @@ function refreshTerminalsVisualState() {
 }
 
 // =========================================================================
-// FASE 1 Y 3: VUELO ESPACIAL (IDA AL PLANETA Y REGRESO A LA TIERRA)
+// FASE 1 (IDA CON METEORITOS) Y FASE 3 (REGRESO AUTOMÁTICO SIN METEORITOS)
 // =========================================================================
 function initFlightPhase(phaseType) {
     arenaPhase = phaseType;
     flightProgress = 0;
     asteroids = [];
     document.getElementById('arena-interact-prompt').classList.add('hidden');
+    document.getElementById('sector-radar-box').classList.add('hidden');
 
     resetArenaRenderer();
     arenaScene.background = new THREE.Color(0x030712);
@@ -232,19 +239,27 @@ function initFlightPhase(phaseType) {
 
     const mission = GAME_STATE.selectedMission;
     const isReturn = phaseType === 'flight_back';
+    const hintBar = document.getElementById('arena-hint');
 
     document.getElementById('arena-phase-title').innerText = isReturn
-        ? '🌍 Regreso Orbital a la Tierra'
+        ? '🌍 Regreso Orbital Automático a la Tierra'
         : `🚀 Travesía hacia ${mission.name}`;
 
     document.getElementById('primary-bar-label').innerText = `🛡️ Escudo Nave: ${Math.round((shipShield / maxShipShield) * 100)}%`;
     document.getElementById('primary-bar-fill').className = 'progress-fill cyan';
     document.getElementById('secondary-bar-label').innerText = isReturn
-        ? '🌍 Progreso a la Tierra: 0%'
+        ? '🌍 Retorno a la Tierra: 0%'
         : `🪐 Progreso a ${mission.name}: 0%`;
     document.getElementById('secondary-bar-fill').className = 'progress-fill amber';
     document.getElementById('secondary-bar-fill').style.width = '0%';
-    document.getElementById('arena-hint').innerHTML = 'Usa <b>W A S D</b> o <b>Flechas</b> para pilotar la nave y esquivar los meteoritos';
+
+    if (isReturn) {
+        // Al volver a la Tierra ya no aparecen meteoritos ni instrucciones de esquivar
+        hintBar.classList.add('hidden');
+    } else {
+        hintBar.classList.remove('hidden');
+        hintBar.innerHTML = 'Usa <b>W A S D</b> o <b>Flechas</b> para pilotar la nave y esquivar los meteoritos';
+    }
 
     const starGeo = new THREE.BufferGeometry();
     const verts = [];
@@ -265,23 +280,26 @@ function initFlightPhase(phaseType) {
     flightRocket.position.set(0, 0, 4);
     arenaScene.add(flightRocket);
 
-    const rockCount = mission.asteroidCount + (isReturn ? 3 : 0);
-    const rockMat = new THREE.MeshStandardMaterial({ color: 0x64748b, roughness: 0.85, metalness: 0.15 });
-    for (let i = 0; i < rockCount; i++) {
-        const radius = 0.65 + Math.random() * 0.75;
-        const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(radius, 1), rockMat);
-        rock.position.set(
-            (Math.random() - 0.5) * 22,
-            (Math.random() - 0.5) * 13,
-            -20 - Math.random() * 110
-        );
-        rock.userData = {
-            radius,
-            rotSpeedX: (Math.random() - 0.5) * 2.5,
-            rotSpeedY: (Math.random() - 0.5) * 2.5
-        };
-        arenaScene.add(rock);
-        asteroids.push(rock);
+    // Solo generar meteoritos en el viaje de ida
+    if (!isReturn) {
+        const rockCount = mission.asteroidCount;
+        const rockMat = new THREE.MeshStandardMaterial({ color: 0x64748b, roughness: 0.85, metalness: 0.15 });
+        for (let i = 0; i < rockCount; i++) {
+            const radius = 0.65 + Math.random() * 0.75;
+            const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(radius, 1), rockMat);
+            rock.position.set(
+                (Math.random() - 0.5) * 22,
+                (Math.random() - 0.5) * 13,
+                -20 - Math.random() * 110
+            );
+            rock.userData = {
+                radius,
+                rotSpeedX: (Math.random() - 0.5) * 2.5,
+                rotSpeedY: (Math.random() - 0.5) * 2.5
+            };
+            arenaScene.add(rock);
+            asteroids.push(rock);
+        }
     }
 
     arenaCamera.position.set(0, 3.2, 12.5);
@@ -300,28 +318,35 @@ function animateFlightPhase(now) {
     MP.tickNetworkHealth();
 
     const stats = GAME_STATE.getShipTotalStats();
-    const moveSpeed = 13 * stats.speedMult;
+    const moveSpeed = 12 * stats.speedMult;
+    const isReturn = arenaPhase === 'flight_back';
 
     if (flightRocket) {
-        let dx = 0;
-        let dy = 0;
-        if (arenaKeys['KeyA'] || arenaKeys['ArrowLeft']) dx -= 1;
-        if (arenaKeys['KeyD'] || arenaKeys['ArrowRight']) dx += 1;
-        if (arenaKeys['KeyW'] || arenaKeys['ArrowUp']) dy += 1;
-        if (arenaKeys['KeyS'] || arenaKeys['ArrowDown']) dy -= 1;
+        if (!isReturn) {
+            let dx = 0;
+            let dy = 0;
+            if (arenaKeys['KeyA'] || arenaKeys['ArrowLeft']) dx -= 1;
+            if (arenaKeys['KeyD'] || arenaKeys['ArrowRight']) dx += 1;
+            if (arenaKeys['KeyW'] || arenaKeys['ArrowUp']) dy += 1;
+            if (arenaKeys['KeyS'] || arenaKeys['ArrowDown']) dy -= 1;
 
-        flightRocket.position.x = Math.max(-10.5, Math.min(10.5, flightRocket.position.x + dx * moveSpeed * dt));
-        flightRocket.position.y = Math.max(-6.2, Math.min(6.2, flightRocket.position.y + dy * moveSpeed * dt));
-        flightRocket.rotation.z = -dx * 0.35;
+            flightRocket.position.x = Math.max(-10.5, Math.min(10.5, flightRocket.position.x + dx * moveSpeed * dt));
+            flightRocket.position.y = Math.max(-6.2, Math.min(6.2, flightRocket.position.y + dy * moveSpeed * dt));
+            flightRocket.rotation.z = -dx * 0.35;
+        } else {
+            // Piloto automático suave centrado hacia la Tierra
+            flightRocket.position.x += (0 - flightRocket.position.x) * 3 * dt;
+            flightRocket.position.y += (0.4 - flightRocket.position.y) * 3 * dt;
+            flightRocket.rotation.z = Math.sin(tNow * 0.002) * 0.06;
+        }
         animateRocketExhaust(flightRocket, dt);
     }
 
-    flightProgress += dt * 7.8 * stats.speedMult;
+    flightProgress += dt * (isReturn ? 16.5 : 8.2) * stats.speedMult;
     const pct = Math.min(100, Math.round(flightProgress));
-    const isReturn = arenaPhase === 'flight_back';
 
     document.getElementById('secondary-bar-label').innerText = isReturn
-        ? `🌍 Progreso a la Tierra: ${pct}%`
+        ? `🌍 Retorno a la Tierra: ${pct}%`
         : `🪐 Progreso a ${GAME_STATE.selectedMission.name}: ${pct}%`;
     document.getElementById('secondary-bar-fill').style.width = `${pct}%`;
 
@@ -337,38 +362,40 @@ function animateFlightPhase(now) {
     }
     starField.geometry.attributes.position.needsUpdate = true;
 
-    const rockSpeed = 28 * stats.speedMult;
-    asteroids.forEach(rock => {
-        rock.position.z += rockSpeed * dt;
-        rock.rotation.x += rock.userData.rotSpeedX * dt;
-        rock.rotation.y += rock.userData.rotSpeedY * dt;
+    if (!isReturn) {
+        const rockSpeed = 26 * stats.speedMult;
+        asteroids.forEach(rock => {
+            rock.position.z += rockSpeed * dt;
+            rock.rotation.x += rock.userData.rotSpeedX * dt;
+            rock.rotation.y += rock.userData.rotSpeedY * dt;
 
-        if (flightRocket) {
-            const dist = rock.position.distanceTo(flightRocket.position);
-            if (dist < rock.userData.radius + 0.95) {
-                shipShield = Math.max(0, shipShield - 18);
-                const shieldPct = Math.round((shipShield / maxShipShield) * 100);
-                document.getElementById('primary-bar-label').innerText = `🛡️ Escudo Nave: ${shieldPct}%`;
-                document.getElementById('primary-bar-fill').style.width = `${shieldPct}%`;
-                rock.position.z = -110 - Math.random() * 35;
-                rock.position.x = (Math.random() - 0.5) * 21;
-                rock.position.y = (Math.random() - 0.5) * 12;
+            if (flightRocket) {
+                const dist = rock.position.distanceTo(flightRocket.position);
+                if (dist < rock.userData.radius + 0.95) {
+                    shipShield = Math.max(0, shipShield - 18);
+                    const shieldPct = Math.round((shipShield / maxShipShield) * 100);
+                    document.getElementById('primary-bar-label').innerText = `🛡️ Escudo Nave: ${shieldPct}%`;
+                    document.getElementById('primary-bar-fill').style.width = `${shieldPct}%`;
+                    rock.position.z = -110 - Math.random() * 35;
+                    rock.position.x = (Math.random() - 0.5) * 21;
+                    rock.position.y = (Math.random() - 0.5) * 12;
 
-                if (shipShield <= 0) {
-                    stopArenaLoop();
-                    unlockGamePointer();
-                    showMissionReport(false, 'El escudo de la nave llegó al 0% por impacto de meteoritos. Mejora tu blindaje en el Taller de Nave.');
-                    return;
+                    if (shipShield <= 0) {
+                        stopArenaLoop();
+                        unlockGamePointer();
+                        showMissionReport(false, 'El escudo de la nave llegó al 0% por impacto de meteoritos. Mejora tu blindaje en el Taller de Nave.');
+                        return;
+                    }
                 }
             }
-        }
 
-        if (rock.position.z > 14) {
-            rock.position.z = -105 - Math.random() * 35;
-            rock.position.x = (Math.random() - 0.5) * 21;
-            rock.position.y = (Math.random() - 0.5) * 12;
-        }
-    });
+            if (rock.position.z > 14) {
+                rock.position.z = -105 - Math.random() * 35;
+                rock.position.x = (Math.random() - 0.5) * 21;
+                rock.position.y = (Math.random() - 0.5) * 12;
+            }
+        });
+    }
 
     if (pct >= 100) {
         stopArenaLoop();
@@ -388,15 +415,20 @@ function animateFlightPhase(now) {
 }
 
 // =========================================================================
-// FASE 2: COMPLEJO ESPACIAL TIPO BACKROOMS 114x114 (25 SECTORES DECORADOS)
+// FASE 2: COMPLEJO ESPACIAL 144x144 (36 SECTORES, PASILLOS LARGOS Y RADAR)
 // =========================================================================
 function initPlanetaryBasePhase() {
     arenaPhase = 'base_ops';
     baseColliders = [];
+    radarWallSegments = [];
     roleTerminals = [];
     remoteBaseAstros = {};
     flickeringLights = [];
     baseCamYaw = 0;
+
+    // Mostrar radar de sectores y ocultar barra inferior genérica
+    document.getElementById('sector-radar-box').classList.remove('hidden');
+    document.getElementById('arena-hint').classList.remove('hidden');
 
     resetArenaRenderer();
 
@@ -404,20 +436,21 @@ function initPlanetaryBasePhase() {
     const role = GAME_STATE.selectedRole;
 
     arenaScene.background = new THREE.Color(0x040812);
-    arenaScene.fog = new THREE.Fog(0x050a16, 26, 76);
+    arenaScene.fog = new THREE.Fog(0x050a16, 28, 86);
 
-    document.getElementById('arena-phase-title').innerText = `🏛️ Complejo Espacial — ${mission.name}`;
-    document.getElementById('primary-bar-label').innerText = `🫁 Oxígeno Traje: 100%`;
-    document.getElementById('primary-bar-fill').className = 'progress-fill green';
-    document.getElementById('primary-bar-fill').style.width = '100%';
+    const o2Pct = Math.round((suitOxygen / maxSuitOxygen) * 100);
+    document.getElementById('arena-phase-title').innerText = `🏛️ Estación Orbital — ${mission.name}`;
+    document.getElementById('primary-bar-label').innerText = `🫁 Oxígeno Traje: ${o2Pct}%`;
+    document.getElementById('primary-bar-fill').className = o2Pct <= 25 ? 'progress-fill red' : 'progress-fill green';
+    document.getElementById('primary-bar-fill').style.width = `${o2Pct}%`;
 
-    document.getElementById('secondary-bar-label').innerText = `📋 Tareas de ${role.short}: 0/${role.tasks.length}`;
+    document.getElementById('secondary-bar-label').innerText = `📋 Tareas de ${role.short}: 0/${activeMissionTasks.length}`;
     document.getElementById('secondary-bar-fill').className = 'progress-fill cyan';
     document.getElementById('secondary-bar-fill').style.width = '0%';
 
-    arenaScene.add(new THREE.AmbientLight(0x94a3b8, 0.72));
+    arenaScene.add(new THREE.AmbientLight(0x94a3b8, 0.78));
 
-    buildBackroomsSpaceshipComplex(mission);
+    buildSpaceshipCorridorComplex(mission);
     buildRoleSpecificTerminals(role);
     refreshTerminalsVisualState();
 
@@ -438,6 +471,75 @@ function initPlanetaryBasePhase() {
     animatePlanetaryBase();
 }
 
+function createSpaceshipHullTexture(accentHexCss) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 512;
+    const ctx = canvas.getContext('2d');
+
+    ctx.fillStyle = '#162033';
+    ctx.fillRect(0, 0, 512, 512);
+
+    // Placas metálicas horizontales y verticales de mamparo espacial
+    ctx.strokeStyle = '#0b1120';
+    ctx.lineWidth = 6;
+    ctx.strokeRect(6, 6, 500, 500);
+    ctx.strokeRect(6, 170, 500, 172);
+    ctx.beginPath();
+    ctx.moveTo(256, 6);
+    ctx.lineTo(256, 506);
+    ctx.stroke();
+
+    // Remaches metálicos en esquinas de cada placa
+    ctx.fillStyle = '#475569';
+    const rivets = [22, 236, 276, 490];
+    const rows = [24, 150, 190, 322, 360, 488];
+    rivets.forEach(rx => {
+        rows.forEach(ry => {
+            ctx.beginPath();
+            ctx.arc(rx, ry, 4, 0, Math.PI * 2);
+            ctx.fill();
+        });
+    });
+
+    // Rejilla de ventilación superior
+    ctx.fillStyle = '#090d16';
+    ctx.fillRect(42, 46, 176, 78);
+    ctx.fillStyle = '#334155';
+    for (let y = 54; y < 118; y += 11) {
+        ctx.fillRect(50, y, 160, 5);
+    }
+
+    // Panel de circuitos luminosos en placa derecha
+    ctx.fillStyle = '#0b1324';
+    ctx.fillRect(290, 46, 176, 78);
+    ctx.fillStyle = accentHexCss;
+    ctx.fillRect(306, 64, 90, 8);
+    ctx.fillStyle = '#38bdf8';
+    ctx.fillRect(306, 84, 130, 8);
+    ctx.fillStyle = '#f59e0b';
+    ctx.fillRect(306, 102, 60, 8);
+
+    // Franja industrial diagonal de seguridad inferior
+    ctx.fillStyle = '#0f172a';
+    ctx.fillRect(10, 444, 492, 42);
+    ctx.fillStyle = '#d97706';
+    for (let x = -40; x < 520; x += 36) {
+        ctx.beginPath();
+        ctx.moveTo(x, 486);
+        ctx.lineTo(x + 18, 486);
+        ctx.lineTo(x + 34, 444);
+        ctx.lineTo(x + 16, 444);
+        ctx.closePath();
+        ctx.fill();
+    }
+
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.RepeatWrapping;
+    return tex;
+}
+
 function addSolidWallBox(cx, cz, widthX, depthZ, heightY, wallMat, trimMat, topTrimMat) {
     const wall = new THREE.Mesh(
         new THREE.BoxGeometry(widthX, heightY, depthZ),
@@ -450,7 +552,7 @@ function addSolidWallBox(cx, cz, widthX, depthZ, heightY, wallMat, trimMat, topT
 
     if (trimMat) {
         const bottomTrim = new THREE.Mesh(
-            new THREE.BoxGeometry(widthX + 0.08, 0.24, depthZ + 0.08),
+            new THREE.BoxGeometry(widthX + 0.1, 0.24, depthZ + 0.1),
             trimMat
         );
         bottomTrim.position.set(cx, 0.35, cz);
@@ -459,10 +561,10 @@ function addSolidWallBox(cx, cz, widthX, depthZ, heightY, wallMat, trimMat, topT
 
     if (topTrimMat) {
         const upperTrim = new THREE.Mesh(
-            new THREE.BoxGeometry(widthX + 0.08, 0.18, depthZ + 0.08),
+            new THREE.BoxGeometry(widthX + 0.1, 0.2, depthZ + 0.1),
             topTrimMat
         );
-        upperTrim.position.set(cx, heightY - 0.85, cz);
+        upperTrim.position.set(cx, heightY - 0.9, cz);
         arenaScene.add(upperTrim);
     }
 
@@ -472,27 +574,54 @@ function addSolidWallBox(cx, cz, widthX, depthZ, heightY, wallMat, trimMat, topT
         minZ: cz - depthZ / 2 - 0.55,
         maxZ: cz + depthZ / 2 + 0.55
     });
+
+    radarWallSegments.push({ cx, cz, widthX, depthZ });
+}
+
+function addInteriorCorridorChute(cx, cz, axis, wallMat, ribMat, accentMat) {
+    // Crea pasillos estrechos tipo nave espacial con costillas estructurales y tuberías laterales
+    const corridorLen = 11.5;
+    const halfGap = 2.85;
+    const wallThick = 0.85;
+    const wallH = 11.0;
+
+    if (axis === 'X') {
+        addSolidWallBox(cx, cz - halfGap - wallThick / 2, corridorLen, wallThick, wallH, wallMat, accentMat, null);
+        addSolidWallBox(cx, cz + halfGap + wallThick / 2, corridorLen, wallThick, wallH, wallMat, accentMat, null);
+
+        [-4.2, 0, 4.2].forEach(ox => {
+            const arch = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.55, halfGap * 2 + 0.4), ribMat);
+            arch.position.set(cx + ox, 5.4, cz);
+            arenaScene.add(arch);
+        });
+    } else {
+        addSolidWallBox(cx - halfGap - wallThick / 2, cz, wallThick, corridorLen, wallH, wallMat, accentMat, null);
+        addSolidWallBox(cx + halfGap + wallThick / 2, cz, wallThick, corridorLen, wallH, wallMat, accentMat, null);
+
+        [-4.2, 0, 4.2].forEach(oz => {
+            const arch = new THREE.Mesh(new THREE.BoxGeometry(halfGap * 2 + 0.4, 0.55, 0.45), ribMat);
+            arch.position.set(cx, 5.4, cz + oz);
+            arenaScene.add(arch);
+        });
+    }
 }
 
 function decorateSpaceshipComplex(mission, sectorCenters, wallH) {
-    const ribMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.4, metalness: 0.65 });
-    const darkRackMat = new THREE.MeshStandardMaterial({ color: 0x111827, roughness: 0.35, metalness: 0.7 });
-    const pipeMat = new THREE.MeshStandardMaterial({ color: 0x475569, roughness: 0.3, metalness: 0.8 });
-    const hazardMat = new THREE.MeshStandardMaterial({ color: 0xf59e0b, emissive: 0xb45309, emissiveIntensity: 0.35 });
-    const screenBlueMat = new THREE.MeshStandardMaterial({ color: 0x0284c7, emissive: 0x0ea5e9, emissiveIntensity: 0.65 });
-    const screenGreenMat = new THREE.MeshStandardMaterial({ color: 0x059669, emissive: 0x10b981, emissiveIntensity: 0.55 });
+    const ribMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.35, metalness: 0.75 });
+    const darkRackMat = new THREE.MeshStandardMaterial({ color: 0x111827, roughness: 0.3, metalness: 0.75 });
+    const pipeMat = new THREE.MeshStandardMaterial({ color: 0x64748b, roughness: 0.28, metalness: 0.82 });
+    const copperPipeMat = new THREE.MeshStandardMaterial({ color: 0xd97706, roughness: 0.35, metalness: 0.7 });
+    const screenBlueMat = new THREE.MeshStandardMaterial({ color: 0x0284c7, emissive: 0x0ea5e9, emissiveIntensity: 0.75 });
+    const screenGreenMat = new THREE.MeshStandardMaterial({ color: 0x059669, emissive: 0x10b981, emissiveIntensity: 0.65 });
     const viewportGlassMat = new THREE.MeshBasicMaterial({ color: 0x020617 });
 
-    const pillarGeo = new THREE.BoxGeometry(0.85, wallH, 0.85);
-    const rackGeo = new THREE.BoxGeometry(2.4, 3.6, 0.75);
-    const rackScreenGeo = new THREE.BoxGeometry(1.9, 1.1, 0.08);
-    const pipeGeo = new THREE.CylinderGeometry(0.14, 0.14, 21.5, 10);
-    const hazardGeo = new THREE.BoxGeometry(2.6, 0.22, 0.12);
-    const viewportFrameGeo = new THREE.BoxGeometry(6.4, 2.6, 0.28);
-    const viewportGlassGeo = new THREE.BoxGeometry(5.9, 2.1, 0.32);
+    const pillarGeo = new THREE.BoxGeometry(1.1, wallH, 1.1);
+    const pipeGeo = new THREE.CylinderGeometry(0.16, 0.16, 23.0, 10);
+    const viewportFrameGeo = new THREE.BoxGeometry(7.2, 3.0, 0.35);
+    const viewportGlassGeo = new THREE.BoxGeometry(6.6, 2.4, 0.4);
 
-    // 1. Pilares estructurales en las intersecciones internas de la nave (4x4 = 16 columnas maestras)
-    const wallLines = [-33.75, -11.25, 11.25, 33.75];
+    // 1. Costillas estructurales en todas las intersecciones de la nave (5x5 = 25 columnas maestras)
+    const wallLines = [-48, -24, 0, 24, 48];
     wallLines.forEach(wx => {
         wallLines.forEach(wz => {
             const col = new THREE.Mesh(pillarGeo, ribMat);
@@ -500,125 +629,128 @@ function decorateSpaceshipComplex(mission, sectorCenters, wallH) {
             arenaScene.add(col);
 
             const ring = new THREE.Mesh(
-                new THREE.BoxGeometry(1.02, 0.32, 1.02),
+                new THREE.BoxGeometry(1.3, 0.36, 1.3),
                 new THREE.MeshBasicMaterial({ color: mission.accentColor })
             );
-            ring.position.set(wx, 2.4, wz);
+            ring.position.set(wx, 2.6, wz);
             arenaScene.add(ring);
 
             baseColliders.push({
-                minX: wx - 0.9,
-                maxX: wx + 0.9,
-                minZ: wz - 0.9,
-                maxZ: wz + 0.9
+                minX: wx - 1.0,
+                maxX: wx + 1.0,
+                minZ: wz - 1.0,
+                maxZ: wz + 1.0
             });
         });
     });
 
-    // 2. Tuberías superiores y luces de techo tipo Backrooms en los 25 sectores
+    // 2. Tuberías industriales, luminarias de techo y módulos de ingeniería en los 36 sectores
     sectorCenters.forEach((sx, ix) => {
         sectorCenters.forEach((sz, iz) => {
-            // Luminaria fluorescente empotrada en techo
-            const isFlicker = (ix + iz) % 5 === 2;
+            const isFlicker = (ix * 3 + iz) % 7 === 3;
             const lampMat = new THREE.MeshBasicMaterial({ color: isFlicker ? 0xfef08a : 0xe0f2fe });
-            const lamp = new THREE.Mesh(new THREE.BoxGeometry(4.2, 0.22, 1.4), lampMat);
+            const lamp = new THREE.Mesh(new THREE.BoxGeometry(4.8, 0.24, 1.5), lampMat);
             lamp.position.set(sx, wallH - 0.05, sz);
             arenaScene.add(lamp);
 
-            // Solo iluminar estratégicamente para mantener 60 FPS fluidos
             if ((ix + iz) % 2 === 0) {
-                const pLight = new THREE.PointLight(isFlicker ? 0xfde047 : mission.accentColor, 0.85, 34);
-                pLight.position.set(sx, wallH - 1.5, sz);
+                const pLight = new THREE.PointLight(isFlicker ? 0xfde047 : mission.accentColor, 0.85, 36);
+                pLight.position.set(sx, wallH - 1.6, sz);
                 arenaScene.add(pLight);
                 if (isFlicker) {
-                    flickeringLights.push({ light: pLight, mesh: lamp, seed: ix * 7 + iz * 13 });
+                    flickeringLights.push({ light: pLight, mesh: lamp, seed: ix * 11 + iz * 17 });
                 }
             }
 
-            // Tuberías industriales paralelas cerca del techo
-            const pipeX = new THREE.Mesh(pipeGeo, pipeMat);
-            pipeX.rotation.z = Math.PI / 2;
-            pipeX.position.set(sx, wallH - 1.15, sz - 8.8);
-            arenaScene.add(pipeX);
+            // Doble tubería superior (acero + cobre)
+            const pipeX1 = new THREE.Mesh(pipeGeo, pipeMat);
+            pipeX1.rotation.z = Math.PI / 2;
+            pipeX1.position.set(sx, wallH - 1.1, sz - 9.8);
+            arenaScene.add(pipeX1);
 
-            const pipeZ = new THREE.Mesh(pipeGeo, pipeMat);
-            pipeZ.rotation.x = Math.PI / 2;
-            pipeZ.position.set(sx - 8.8, wallH - 1.45, sz);
-            arenaScene.add(pipeZ);
+            const pipeX2 = new THREE.Mesh(pipeGeo, copperPipeMat);
+            pipeX2.rotation.z = Math.PI / 2;
+            pipeX2.position.set(sx, wallH - 1.5, sz - 9.8);
+            arenaScene.add(pipeX2);
 
-            // Racks de servidores / consolas decorativas en esquinas libres de los sectores
-            if ((ix * 3 + iz) % 2 === 0 && !(ix === 2 && iz === 2)) {
-                const rack = new THREE.Mesh(rackGeo, darkRackMat);
-                rack.position.set(sx + 7.6, 1.8, sz + 7.6);
+            // Racks de servidores holográficos y cilindros de soporte vital en esquinas de salas
+            if ((ix + iz) % 2 === 1 && !(ix === 2 && iz === 2)) {
+                const rack = new THREE.Mesh(new THREE.BoxGeometry(2.5, 3.8, 0.85), darkRackMat);
+                rack.position.set(sx + 8.6, 1.9, sz + 8.6);
                 rack.rotation.y = -Math.PI / 4;
                 arenaScene.add(rack);
 
-                const scr = new THREE.Mesh(rackScreenGeo, (ix + iz) % 4 === 0 ? screenBlueMat : screenGreenMat);
-                scr.position.set(sx + 7.32, 2.35, sz + 7.32);
+                const scr = new THREE.Mesh(
+                    new THREE.BoxGeometry(2.0, 1.25, 0.1),
+                    (ix + iz) % 4 === 1 ? screenBlueMat : screenGreenMat
+                );
+                scr.position.set(sx + 8.28, 2.45, sz + 8.28);
                 scr.rotation.y = -Math.PI / 4;
                 arenaScene.add(scr);
+            }
 
-                const haz = new THREE.Mesh(hazardGeo, hazardMat);
-                haz.position.set(sx + 7.32, 0.45, sz + 7.32);
-                haz.rotation.y = -Math.PI / 4;
-                arenaScene.add(haz);
+            // Tanques criogénicos verticales en sectores pares
+            if ((ix * 2 + iz) % 3 === 0 && !(ix === 2 && iz === 2)) {
+                const tank = new THREE.Mesh(
+                    new THREE.CylinderGeometry(0.65, 0.65, 4.2, 16),
+                    copperPipeMat
+                );
+                tank.position.set(sx - 8.8, 2.1, sz - 8.8);
+                arenaScene.add(tank);
             }
         });
     });
 
-    // 3. Ventanales espaciales blindados en los muros exteriores (evitando las posiciones de terminales)
-    const windowOffsets = [-33.75, -11.25, 11.25, 33.75];
-    windowOffsets.forEach(coord => {
-        // Muro Norte y Sur
-        [-55.45, 55.45].forEach(zWall => {
+    // 3. Ventanales espaciales blindados en muros exteriores
+    const windowCoords = [-48, -24, 0, 24, 48];
+    windowCoords.forEach(coord => {
+        [-71.3, 71.3].forEach(zWall => {
             const frame = new THREE.Mesh(viewportFrameGeo, ribMat);
-            frame.position.set(coord, 4.4, zWall);
+            frame.position.set(coord, 4.6, zWall);
             arenaScene.add(frame);
 
             const glass = new THREE.Mesh(viewportGlassGeo, viewportGlassMat);
-            glass.position.set(coord, 4.4, zWall);
+            glass.position.set(coord, 4.6, zWall);
             arenaScene.add(glass);
 
-            // Estrellas visibles dentro del ventanal
-            for (let s = -2; s <= 2; s += 2) {
+            for (let s = -2; s <= 2; s++) {
                 const starDot = new THREE.Mesh(
-                    new THREE.SphereGeometry(0.08, 6, 6),
+                    new THREE.SphereGeometry(0.09, 6, 6),
                     new THREE.MeshBasicMaterial({ color: 0xe0f2fe })
                 );
-                starDot.position.set(coord + s * 0.9, 4.4 + (s % 2) * 0.4, zWall + (zWall < 0 ? 0.18 : -0.18));
+                starDot.position.set(coord + s * 1.1, 4.6 + (s % 2) * 0.45, zWall + (zWall < 0 ? 0.22 : -0.22));
                 arenaScene.add(starDot);
             }
         });
 
-        // Muro Oeste y Este
-        [-55.45, 55.45].forEach(xWall => {
+        [-71.3, 71.3].forEach(xWall => {
             const frame = new THREE.Mesh(viewportFrameGeo, ribMat);
             frame.rotation.y = Math.PI / 2;
-            frame.position.set(xWall, 4.4, coord);
+            frame.position.set(xWall, 4.6, coord);
             arenaScene.add(frame);
 
             const glass = new THREE.Mesh(viewportGlassGeo, viewportGlassMat);
             glass.rotation.y = Math.PI / 2;
-            glass.position.set(xWall, 4.4, coord);
+            glass.position.set(xWall, 4.6, coord);
             arenaScene.add(glass);
         });
     });
 }
 
-function buildBackroomsSpaceshipComplex(mission) {
+function buildSpaceshipCorridorComplex(mission) {
     const WALL_H = 11.0;
-    const WALL_T = 1.4;
-    const SPAN = 112.5; // 5 sectores x 22.5 = 112.5 (-56.25 a +56.25)
+    const WALL_T = 1.5;
+    const SPAN = 144.0; // 6x6 sectores de 24x24 (-72 a +72)
 
     const floor = new THREE.Mesh(
         new THREE.PlaneGeometry(SPAN + 4, SPAN + 4),
-        new THREE.MeshStandardMaterial({ color: 0x0b1222, roughness: 0.42, metalness: 0.35 })
+        new THREE.MeshStandardMaterial({ color: 0x0b1222, roughness: 0.4, metalness: 0.35 })
     );
     floor.rotation.x = -Math.PI / 2;
     floor.receiveShadow = true;
     arenaScene.add(floor);
 
-    const grid = new THREE.GridHelper(SPAN, 50, mission.accentColor, 0x1e293b);
+    const grid = new THREE.GridHelper(SPAN, 60, mission.accentColor, 0x1e293b);
     grid.position.y = 0.01;
     arenaScene.add(grid);
 
@@ -629,29 +761,29 @@ function buildBackroomsSpaceshipComplex(mission) {
     ceiling.position.set(0, WALL_H + 0.4, 0);
     arenaScene.add(ceiling);
 
-    const outerWallMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.5, metalness: 0.3 });
-    const innerWallMat = new THREE.MeshStandardMaterial({ color: 0x243247, roughness: 0.48, metalness: 0.28 });
+    const accentHexCss = '#' + mission.accentColor.toString(16).padStart(6, '0');
+    const hullTex = createSpaceshipHullTexture(accentHexCss);
+    const outerWallMat = new THREE.MeshStandardMaterial({ map: hullTex, roughness: 0.42, metalness: 0.45 });
+    const innerWallMat = new THREE.MeshStandardMaterial({ map: hullTex, roughness: 0.45, metalness: 0.4 });
+    const ribMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.35, metalness: 0.7 });
     const trimMat = new THREE.MeshBasicMaterial({ color: mission.accentColor });
     const upperTrimMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8 });
 
-    // 4 Muros Exteriores Blindados (±56.25)
-    addSolidWallBox(0, -56.25, SPAN + WALL_T, WALL_T, WALL_H, outerWallMat, trimMat, upperTrimMat);
-    addSolidWallBox(0, 56.25, SPAN + WALL_T, WALL_T, WALL_H, outerWallMat, trimMat, upperTrimMat);
-    addSolidWallBox(-56.25, 0, WALL_T, SPAN + WALL_T, WALL_H, outerWallMat, trimMat, upperTrimMat);
-    addSolidWallBox(56.25, 0, WALL_T, SPAN + WALL_T, WALL_H, outerWallMat, trimMat, upperTrimMat);
+    // Muros exteriores blindados (±72)
+    addSolidWallBox(0, -72.0, SPAN + WALL_T, WALL_T, WALL_H, outerWallMat, trimMat, upperTrimMat);
+    addSolidWallBox(0, 72.0, SPAN + WALL_T, WALL_T, WALL_H, outerWallMat, trimMat, upperTrimMat);
+    addSolidWallBox(-72.0, 0, WALL_T, SPAN + WALL_T, WALL_H, outerWallMat, trimMat, upperTrimMat);
+    addSolidWallBox(72.0, 0, WALL_T, SPAN + WALL_T, WALL_H, outerWallMat, trimMat, upperTrimMat);
 
-    // Laberinto 5x5 con conectividad 100% garantizada (Árbol de expansión + corredores extra)
-    const sectorCenters = [-45, -22.5, 0, 22.5, 45];
+    // 6x6 sectores centrados en: -60, -36, -12, 12, 36, 60
+    const sectorCenters = [-60, -36, -12, 12, 36, 60];
     const doorHalf = 2.6;
 
-    // Conjuntos de puertas abiertas:
-    // vOpen["ix_iz"] = true si hay puerta en el muro vertical entre (ix, iz) y (ix+1, iz)
-    // hOpen["ix_iz"] = true si hay puerta en el muro horizontal entre (ix, iz) y (ix, iz+1)
     const vOpen = {};
     const hOpen = {};
 
-    // 1. Generar árbol de expansión determinista para garantizar que los 25 sectores estén conectados
-    const visited = Array.from({ length: 5 }, () => Array(5).fill(false));
+    // Árbol de expansión determinista para conectar los 36 sectores sin habitaciones aisladas
+    const visited = Array.from({ length: 6 }, () => Array(6).fill(false));
     function carveMaze(cx, cz) {
         visited[cx][cz] = true;
         const dirs = [
@@ -664,7 +796,7 @@ function buildBackroomsSpaceshipComplex(mission) {
         dirs.forEach(d => {
             const nx = cx + d.dx;
             const nz = cz + d.dz;
-            if (nx >= 0 && nx < 5 && nz >= 0 && nz < 5 && !visited[nx][nz]) {
+            if (nx >= 0 && nx < 6 && nz >= 0 && nz < 6 && !visited[nx][nz]) {
                 if (d.dx === 1) vOpen[`${cx}_${cz}`] = true;
                 if (d.dx === -1) vOpen[`${nx}_${cz}`] = true;
                 if (d.dz === 1) hOpen[`${cx}_${cz}`] = true;
@@ -675,98 +807,95 @@ function buildBackroomsSpaceshipComplex(mission) {
     }
     carveMaze(2, 2);
 
-    // 2. Abrir bucles adicionales (~50% de muros restantes) para crear rutas alternativas estilo Backrooms
-    for (let ix = 0; ix < 4; ix++) {
-        for (let iz = 0; iz < 5; iz++) {
-            if ((ix + iz) % 2 === 0 || (ix === 1 && iz === 2) || (ix === 2 && iz === 2)) {
-                vOpen[`${ix}_${iz}`] = true;
-            }
-        }
-    }
-    for (let ix = 0; ix < 5; ix++) {
-        for (let iz = 0; iz < 4; iz++) {
-            if ((ix * 2 + iz) % 2 === 1 || (ix === 2 && iz === 1) || (ix === 2 && iz === 2)) {
-                hOpen[`${ix}_${iz}`] = true;
-            }
-        }
-    }
+    // Abrir algunos enlaces estratégicos alrededor del núcleo central (0,0) para fluidez
+    vOpen['2_2'] = true;
+    hOpen['2_2'] = true;
+    vOpen['1_3'] = true;
+    hOpen['3_1'] = true;
 
-    // Construir los 4 muros internos verticales (x = -33.75, -11.25, 11.25, 33.75)
-    for (let ix = 0; ix < 4; ix++) {
-        const wallX = -33.75 + ix * 22.5;
-        for (let iz = 0; iz < 5; iz++) {
+    // Construir 5 muros internos verticales (-48, -24, 0, 24, 48)
+    for (let ix = 0; ix < 5; ix++) {
+        const wallX = -48 + ix * 24;
+        for (let iz = 0; iz < 6; iz++) {
             const centerZ = sectorCenters[iz];
-            const segStart = centerZ - 11.25;
-            const segEnd = centerZ + 11.25;
+            const segStart = centerZ - 12;
+            const segEnd = centerZ + 12;
 
             if (vOpen[`${ix}_${iz}`]) {
-                // Muro con compuerta abierta
                 const leftLen = (centerZ - doorHalf) - segStart;
                 const rightLen = segEnd - (centerZ + doorHalf);
-                addSolidWallBox(wallX, segStart + leftLen / 2, 1.1, leftLen, WALL_H, innerWallMat, trimMat, upperTrimMat);
-                addSolidWallBox(wallX, (centerZ + doorHalf) + rightLen / 2, 1.1, rightLen, WALL_H, innerWallMat, trimMat, upperTrimMat);
+                addSolidWallBox(wallX, segStart + leftLen / 2, 1.2, leftLen, WALL_H, innerWallMat, trimMat, upperTrimMat);
+                addSolidWallBox(wallX, (centerZ + doorHalf) + rightLen / 2, 1.2, rightLen, WALL_H, innerWallMat, trimMat, upperTrimMat);
 
-                const lintel = new THREE.Mesh(new THREE.BoxGeometry(1.1, WALL_H - 4.8, doorHalf * 2), innerWallMat);
+                const lintel = new THREE.Mesh(new THREE.BoxGeometry(1.2, WALL_H - 4.8, doorHalf * 2), innerWallMat);
                 lintel.position.set(wallX, 4.8 + (WALL_H - 4.8) / 2, centerZ);
                 arenaScene.add(lintel);
 
-                const doorFrameGlow = new THREE.Mesh(
-                    new THREE.BoxGeometry(1.22, 0.22, doorHalf * 2),
-                    new THREE.MeshBasicMaterial({ color: 0x38bdf8 })
-                );
-                doorFrameGlow.position.set(wallX, 4.85, centerZ);
-                arenaScene.add(doorFrameGlow);
+                const glow = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.22, doorHalf * 2), new THREE.MeshBasicMaterial({ color: 0x38bdf8 }));
+                glow.position.set(wallX, 4.85, centerZ);
+                arenaScene.add(glow);
             } else {
-                // Mamparo cerrado completo (obliga a rodear por el laberinto)
-                addSolidWallBox(wallX, centerZ, 1.1, 22.5, WALL_H, innerWallMat, trimMat, upperTrimMat);
+                addSolidWallBox(wallX, centerZ, 1.2, 24.0, WALL_H, innerWallMat, trimMat, upperTrimMat);
             }
         }
     }
 
-    // Construir los 4 muros internos horizontales (z = -33.75, -11.25, 11.25, 33.75)
-    for (let iz = 0; iz < 4; iz++) {
-        const wallZ = -33.75 + iz * 22.5;
-        for (let ix = 0; ix < 5; ix++) {
+    // Construir 5 muros internos horizontales (-48, -24, 0, 24, 48)
+    for (let iz = 0; iz < 5; iz++) {
+        const wallZ = -48 + iz * 24;
+        for (let ix = 0; ix < 6; ix++) {
             const centerX = sectorCenters[ix];
-            const segStart = centerX - 11.25;
-            const segEnd = centerX + 11.25;
+            const segStart = centerX - 12;
+            const segEnd = centerX + 12;
 
             if (hOpen[`${ix}_${iz}`]) {
                 const leftLen = (centerX - doorHalf) - segStart;
                 const rightLen = segEnd - (centerX + doorHalf);
-                addSolidWallBox(segStart + leftLen / 2, wallZ, leftLen, 1.1, WALL_H, innerWallMat, trimMat, upperTrimMat);
-                addSolidWallBox((centerX + doorHalf) + rightLen / 2, wallZ, rightLen, 1.1, WALL_H, innerWallMat, trimMat, upperTrimMat);
+                addSolidWallBox(segStart + leftLen / 2, wallZ, leftLen, 1.2, WALL_H, innerWallMat, trimMat, upperTrimMat);
+                addSolidWallBox((centerX + doorHalf) + rightLen / 2, wallZ, rightLen, 1.2, WALL_H, innerWallMat, trimMat, upperTrimMat);
 
-                const lintel = new THREE.Mesh(new THREE.BoxGeometry(doorHalf * 2, WALL_H - 4.8, 1.1), innerWallMat);
+                const lintel = new THREE.Mesh(new THREE.BoxGeometry(doorHalf * 2, WALL_H - 4.8, 1.2), innerWallMat);
                 lintel.position.set(centerX, 4.8 + (WALL_H - 4.8) / 2, wallZ);
                 arenaScene.add(lintel);
 
-                const doorFrameGlow = new THREE.Mesh(
-                    new THREE.BoxGeometry(doorHalf * 2, 0.22, 1.22),
-                    new THREE.MeshBasicMaterial({ color: 0x38bdf8 })
-                );
-                doorFrameGlow.position.set(centerX, 4.85, wallZ);
-                arenaScene.add(doorFrameGlow);
+                const glow = new THREE.Mesh(new THREE.BoxGeometry(doorHalf * 2, 0.22, 1.3), new THREE.MeshBasicMaterial({ color: 0x38bdf8 }));
+                glow.position.set(centerX, 4.85, wallZ);
+                arenaScene.add(glow);
             } else {
-                addSolidWallBox(centerX, wallZ, 22.5, 1.1, WALL_H, innerWallMat, trimMat, upperTrimMat);
+                addSolidWallBox(centerX, wallZ, 24.0, 1.2, WALL_H, innerWallMat, trimMat, upperTrimMat);
             }
         }
     }
 
-    // Decoraciones detalladas de nave espacial en todos los corredores y muros
+    // Convertir sectores intermedios específicos en PASILLOS LARGOS DE NAVE (rompiendo la forma cuadrada)
+    const longCorridors = [
+        { cx: -36, cz: -36, axis: 'X' },
+        { cx: 36, cz: -36, axis: 'X' },
+        { cx: -36, cz: 36, axis: 'X' },
+        { cx: 36, cz: 36, axis: 'X' },
+        { cx: -12, cz: -36, axis: 'Z' },
+        { cx: 12, cz: 36, axis: 'Z' },
+        { cx: -36, cz: 12, axis: 'Z' },
+        { cx: 36, cz: -12, axis: 'Z' }
+    ];
+    longCorridors.forEach(cor => {
+        addInteriorCorridorChute(cor.cx, cor.cz, cor.axis, innerWallMat, ribMat, trimMat);
+    });
+
     decorateSpaceshipComplex(mission, sectorCenters, WALL_H);
 
-    // Letreros superiores de los 25 sectores
+    // Letreros superiores de los 36 sectores
     const sectorNames = [
-        ['ESCUDOS (NW)', 'ENLACE SATELITAL', 'PUENTE PRINCIPAL (N)', 'GIROSCOPIOS', 'CRIOGENIA (NE)'],
-        ['REFRIGERACIÓN', 'CORREDOR ALFA-2', 'TIMÓN CENTRAL-N', 'CORREDOR BETA-2', 'INVERNADERO LED'],
-        ['REACTOR (W)', 'BALIZA CENTRAL', 'NÚCLEO CENTRAL', 'ANALIZADOR ATMO', 'LABORATORIO (E)'],
-        ['CORREDOR GAMMA-4', 'PASILLO SUR-OESTE', 'TURBINAS CENTRAL-S', 'PASILLO SUR-ESTE', 'RADAR ESPACIAL'],
-        ['SUBESTACIÓN (SW)', 'ESCÁNER GEOLÓGICO', 'ANTENAS SUR (S)', 'BAHÍA AUXILIAR', 'PROPULSORES (SE)']
+        ['ESCUDOS (NW)', 'ENLACE SATELITAL', 'PUENTE PRINCIPAL (N)', 'GIROSCOPIOS', 'GALERÍA NORTE', 'CRIOGENIA (NE)'],
+        ['REFRIGERACIÓN', 'CORREDOR ALFA-1', 'TÚNEL CENTRAL-N', 'CORREDOR BETA-1', 'PASILLO ESTE-N', 'INVERNADERO LED'],
+        ['REACTOR (W)', 'BALIZA CENTRAL', 'DESEMBARCO (0,0)', 'ANALIZADOR ATMO', 'ANTECÁMARA LAB', 'LABORATORIO (E)'],
+        ['PASILLO OESTE-S', 'TÚNEL OESTE-SUR', 'NÚCLEO ENERGÍA', 'TÚNEL CENTRAL-S', 'CORREDOR GAMMA', 'RADAR ESPACIAL'],
+        ['DUCTO SUR-W', 'PASILLO SUR-OESTE', 'CORREDOR SUR-C', 'TURBINAS AUXILIARES', 'PASILLO SUR-ESTE', 'BAHÍA TÉCNICA'],
+        ['SUBESTACIÓN (SW)', 'ESCÁNER GEOLÓGICO', 'ANTENAS SUR (S)', 'COMPUERTA SUR', 'ESCLUSA CARGA', 'PROPULSORES (SE)']
     ];
 
-    for (let iz = 0; iz < 5; iz++) {
-        for (let ix = 0; ix < 5; ix++) {
+    for (let iz = 0; iz < 6; iz++) {
+        for (let ix = 0; ix < 6; ix++) {
             const label = sectorNames[iz][ix];
             const sprite = createConsoleLabelSprite(label, '#38bdf8');
             sprite.scale.set(5.4, 1.15, 1);
@@ -779,7 +908,7 @@ function buildBackroomsSpaceshipComplex(mission) {
 function buildRoleSpecificTerminals(role) {
     roleTerminals = [];
 
-    role.tasks.forEach((task, taskIndex) => {
+    activeMissionTasks.forEach((task, taskIndex) => {
         const group = new THREE.Group();
         group.position.set(task.x, 0, task.z);
         group.rotation.y = task.rotY || 0;
@@ -822,13 +951,93 @@ function buildRoleSpecificTerminals(role) {
     });
 }
 
+function drawSectorRadarMinimap() {
+    const canvas = document.getElementById('sector-radar-canvas');
+    if (!canvas || !baseAstroRig) return;
+    const ctx = canvas.getContext('2d');
+    const W = canvas.width;
+    const H = canvas.height;
+    const HALF_WORLD = 73.0; // -73 a +73
+
+    const toCanvasX = wx => ((wx + HALF_WORLD) / (HALF_WORLD * 2)) * W;
+    const toCanvasY = wz => ((wz + HALF_WORLD) / (HALF_WORLD * 2)) * H;
+
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = '#050b18';
+    ctx.fillRect(0, 0, W, H);
+
+    // Cuadrícula de los 36 sectores
+    ctx.strokeStyle = 'rgba(56, 189, 248, 0.14)';
+    ctx.lineWidth = 1;
+    for (let g = -48; g <= 48; g += 24) {
+        const cx = toCanvasX(g);
+        const cy = toCanvasY(g);
+        ctx.beginPath(); ctx.moveTo(cx, 0); ctx.lineTo(cx, H); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(0, cy); ctx.lineTo(W, cy); ctx.stroke();
+    }
+
+    // Muros y pasillos de la nave
+    ctx.fillStyle = '#334155';
+    radarWallSegments.forEach(seg => {
+        const x1 = toCanvasX(seg.cx - seg.widthX / 2);
+        const y1 = toCanvasY(seg.cz - seg.depthZ / 2);
+        const rw = Math.max(1.5, (seg.widthX / (HALF_WORLD * 2)) * W);
+        const rh = Math.max(1.5, (seg.depthZ / (HALF_WORLD * 2)) * H);
+        ctx.fillRect(x1, y1, rw, rh);
+    });
+
+    // Puntos de tareas del rol (Verde = lista, Rojo = bloqueada, Cian/Rol = disponible)
+    const myRoleId = GAME_STATE.selectedRole.id;
+    roleTerminals.forEach(t => {
+        const tx = toCanvasX(t.x);
+        const ty = toCanvasY(t.z);
+        if (completedTaskIds.has(t.id)) {
+            ctx.fillStyle = '#10b981';
+        } else if (getTaskLockInfo(myRoleId, t.taskIndex).locked) {
+            ctx.fillStyle = '#ef4444';
+        } else {
+            ctx.fillStyle = '#38bdf8';
+        }
+        ctx.beginPath();
+        ctx.arc(tx, ty, 3.6, 0, Math.PI * 2);
+        ctx.fill();
+    });
+
+    // Compañeros conectados
+    Object.values(MP.players).forEach(p => {
+        if (p.id === MP.myId) return;
+        const px = toCanvasX(p.x || 0);
+        const py = toCanvasY(p.z || 0);
+        ctx.fillStyle = '#f59e0b';
+        ctx.beginPath();
+        ctx.arc(px, py, 3.3, 0, Math.PI * 2);
+        ctx.fill();
+    });
+
+    // Posición y dirección de mirada del jugador local
+    const meX = toCanvasX(baseAstroRig.group.position.x);
+    const meY = toCanvasY(baseAstroRig.group.position.z);
+
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.65)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(meX, meY);
+    ctx.lineTo(meX - Math.sin(baseCamYaw) * 11, meY - Math.cos(baseCamYaw) * 11);
+    ctx.stroke();
+
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(meX, meY, 4.0, 0, Math.PI * 2);
+    ctx.fill();
+}
+
 function updateBaseCompassHint() {
     const pending = roleTerminals.filter(t => !completedTaskIds.has(t.id));
     const hintEl = document.getElementById('arena-hint');
     if (!hintEl) return;
 
     if (pending.length === 0) {
-        hintEl.innerHTML = '✅ <b>¡Tus 5 tareas completadas!</b> Preparando regreso orbital...';
+        hintEl.innerHTML = '✅ <b>¡Tus 5 tareas completadas!</b> Iniciando retorno orbital...';
         return;
     }
 
@@ -861,14 +1070,14 @@ function resolveBaseWallCollisions(pos) {
             else if (minOverlap === overlapBottom) pos.z = box.maxZ + r;
         }
     }
-    pos.x = Math.max(-55.0, Math.min(55.0, pos.x));
-    pos.z = Math.max(-55.0, Math.min(55.0, pos.z));
+    pos.x = Math.max(-70.8, Math.min(70.8, pos.x));
+    pos.z = Math.max(-70.8, Math.min(70.8, pos.z));
 }
 
 function clampBaseCameraInsideWalls(camPos, targetPos) {
     camPos.y = Math.min(9.2, Math.max(1.8, camPos.y));
-    camPos.x = Math.max(-54.8, Math.min(54.8, camPos.x));
-    camPos.z = Math.max(-54.8, Math.min(54.8, camPos.z));
+    camPos.x = Math.max(-70.6, Math.min(70.6, camPos.x));
+    camPos.z = Math.max(-70.6, Math.min(70.6, camPos.z));
 
     const steps = 8;
     for (let s = 1; s <= steps; s++) {
@@ -888,7 +1097,7 @@ function clampBaseCameraInsideWalls(camPos, targetPos) {
 }
 
 function syncBaseRemoteAstronauts(elapsed, dt) {
-    MP.updateBots(dt, 48);
+    MP.updateBots(dt, 62);
 
     if (MP.isHost) {
         botTaskTimer += dt;
@@ -896,12 +1105,11 @@ function syncBaseRemoteAstronauts(elapsed, dt) {
             botTaskTimer = 0;
             Object.values(MP.players).forEach(p => {
                 if (!p.isBot) return;
-                const botRole = GAME_DATA.roles.find(r => r.id === p.roleId);
-                if (!botRole) return;
-                const doneList = MP.completedTasksByRole[botRole.id] || [];
-                const nextBotTask = botRole.tasks.find(t => !doneList.includes(t.id));
+                const botTasks = getMissionTasksForRole(GAME_STATE.selectedMission.id, p.roleId, MP.roomCode);
+                const doneList = MP.completedTasksByRole[p.roleId] || [];
+                const nextBotTask = botTasks.find(t => !doneList.includes(t.id));
                 if (nextBotTask) {
-                    MP.reportTaskCompleted(botRole.id, nextBotTask.id);
+                    MP.reportTaskCompleted(p.roleId, nextBotTask.id);
                     onRemoteTaskStateUpdated();
                 }
             });
@@ -938,7 +1146,7 @@ function syncBaseRemoteAstronauts(elapsed, dt) {
         if (rig.propellerMesh) rig.propellerMesh.rotation.y += 0.25;
 
         if (p.moving) {
-            const swing = Math.sin(elapsed * 11) * 0.5;
+            const swing = Math.sin(elapsed * 10) * 0.48;
             rig.leftLeg.rotation.x = swing;
             rig.rightLeg.rotation.x = -swing;
             rig.leftArm.rotation.x = -swing;
@@ -968,15 +1176,14 @@ function animatePlanetaryBase(now) {
 
     MP.tickNetworkHealth();
 
-    // Efecto sutil de parpadeo tipo Backrooms en luces seleccionadas
     flickeringLights.forEach(fl => {
         const wave = Math.sin(elapsed * 19 + fl.seed) * Math.cos(elapsed * 7 + fl.seed);
-        const dim = wave > 0.78 ? 0.25 : 0.85;
-        fl.light.intensity = dim;
+        fl.light.intensity = wave > 0.78 ? 0.22 : 0.85;
     });
 
+    // Desgaste continuo del oxígeno (1.35x más rápido y sin regenerarse jamás al completar misiones)
     if (!isTaskModalOpen) {
-        suitOxygen = Math.max(0, suitOxygen - dt);
+        suitOxygen = Math.max(0, suitOxygen - dt * 1.35);
         const o2Pct = Math.round((suitOxygen / maxSuitOxygen) * 100);
         document.getElementById('primary-bar-label').innerText = `🫁 Oxígeno Traje: ${o2Pct}%`;
         document.getElementById('primary-bar-fill').style.width = `${o2Pct}%`;
@@ -986,7 +1193,7 @@ function animatePlanetaryBase(now) {
         if (suitOxygen <= 0) {
             stopArenaLoop();
             unlockGamePointer();
-            showMissionReport(false, 'Se agotó el oxígeno de tu traje espacial en el complejo. Equipa alas o fuselaje de largo alcance para mayor reserva.');
+            showMissionReport(false, 'Se agotó el oxígeno de tu traje espacial en la estación. Equipa alas o fuselaje de largo alcance para mayor reserva.');
             return;
         }
     }
@@ -1008,7 +1215,8 @@ function animatePlanetaryBase(now) {
             if (arenaKeys['KeyA'] || arenaKeys['ArrowLeft']) strafe -= 1;
             if (arenaKeys['KeyD'] || arenaKeys['ArrowRight']) strafe += 1;
 
-            const speed = (arenaKeys['ShiftLeft'] || arenaKeys['ShiftRight']) ? 0.24 : 0.16;
+            // Velocidad controlada de caminar (0.10) y correr (0.165)
+            const speed = (arenaKeys['ShiftLeft'] || arenaKeys['ShiftRight']) ? 0.165 : 0.10;
             if (forward !== 0 || strafe !== 0) {
                 moving = true;
                 const sinY = Math.sin(baseCamYaw);
@@ -1041,7 +1249,7 @@ function animatePlanetaryBase(now) {
             baseAstroRig.leftArm.rotation.x = -0.6;
             baseAstroRig.rightArm.rotation.x = -0.6;
         } else if (moving) {
-            const swing = Math.sin(elapsed * 12) * 0.52;
+            const swing = Math.sin(elapsed * 10) * 0.48;
             baseAstroRig.leftLeg.rotation.x = swing;
             baseAstroRig.rightLeg.rotation.x = -swing;
             baseAstroRig.leftArm.rotation.x = -swing;
@@ -1072,14 +1280,18 @@ function animatePlanetaryBase(now) {
             }
         });
         activeTerminal = nearest;
-
         const promptBtn = document.getElementById('arena-interact-prompt');
+
         if (activeTerminal && !isTaskModalOpen) {
             const lockInfo = getTaskLockInfo(GAME_STATE.selectedRole.id, activeTerminal.taskIndex);
             if (lockInfo.locked) {
-                promptBtn.innerHTML = `🔒 Bloqueado: Espera a que <strong>${lockInfo.partnerRoleName}</strong> complete su Tarea ${lockInfo.partnerTaskIndex} (<em>${lockInfo.partnerTaskTitle}</em>)`;
+                promptBtn.style.background = 'rgba(153, 27, 27, 0.94)';
+                promptBtn.style.borderColor = '#f87171';
+                promptBtn.innerHTML = `🔒 Bloqueado: Espera a <strong>${lockInfo.partnerRoleName}</strong> (Tarea ${lockInfo.partnerTaskIndex})`;
             } else {
-                promptBtn.innerHTML = `Presiona <strong>[E]</strong> o haz clic para operar: <span id="arena-task-name">${activeTerminal.title}</span>`;
+                promptBtn.style.background = 'linear-gradient(135deg, #0284c7, #0369a1)';
+                promptBtn.style.borderColor = '#7dd3fc';
+                promptBtn.innerHTML = `Presiona <strong>[E]</strong> o haz clic para operar: <span>${activeTerminal.title}</span>`;
             }
             promptBtn.classList.remove('hidden');
         } else {
@@ -1087,59 +1299,30 @@ function animatePlanetaryBase(now) {
         }
 
         const camDist = 6.2;
-        const rawCam = new THREE.Vector3(
+        const targetPos = new THREE.Vector3(baseAstroRig.group.position.x, baseAstroRig.group.position.y + 1.8, baseAstroRig.group.position.z);
+        const desiredCam = new THREE.Vector3(
             baseAstroRig.group.position.x + Math.sin(baseCamYaw) * camDist,
-            baseAstroRig.group.position.y + 3.6,
+            baseAstroRig.group.position.y + 3.8,
             baseAstroRig.group.position.z + Math.cos(baseCamYaw) * camDist
         );
-        const lookTarget = new THREE.Vector3(
-            baseAstroRig.group.position.x,
-            baseAstroRig.group.position.y + 1.8,
-            baseAstroRig.group.position.z
-        );
-        clampBaseCameraInsideWalls(rawCam, lookTarget);
-        arenaCamera.position.copy(rawCam);
-        arenaCamera.lookAt(lookTarget);
+        clampBaseCameraInsideWalls(desiredCam, targetPos);
+        arenaCamera.position.copy(desiredCam);
+        arenaCamera.lookAt(targetPos);
     }
 
     syncBaseRemoteAstronauts(elapsed, dt);
+    drawSectorRadarMinimap();
     arenaRenderer.render(arenaScene, arenaCamera);
 }
 
 // =========================================================================
-// MINIJUEGOS CON VERIFICACIÓN CIENTÍFICA NASA CORTA
+// MINIJUEGOS DE INGENIERÍA ESPACIAL + PREGUNTA CIENTÍFICA NASA (10 VARIANTES)
 // =========================================================================
 function closeTaskModal() {
     isTaskModalOpen = false;
     resetAllInputStates();
     document.getElementById('planet-task-modal').classList.add('hidden');
-    if (arenaPhase === 'base_ops') {
-        lockGamePointer();
-    }
-}
-
-function completeCurrentTask(task) {
-    completedTaskIds.add(task.id);
-    MP.reportTaskCompleted(GAME_STATE.selectedRole.id, task.id);
-    refreshTerminalsVisualState();
-
-    const total = GAME_STATE.selectedRole.tasks.length;
-    const done = completedTaskIds.size;
-    const pct = Math.round((done / total) * 100);
-
-    document.getElementById('samples-counter').innerText = `📋 Tareas ${GAME_STATE.selectedRole.short}: ${done} / ${total}`;
-    document.getElementById('secondary-bar-label').innerText = `📋 Tareas de ${GAME_STATE.selectedRole.short}: ${done}/${total}`;
-    document.getElementById('secondary-bar-fill').style.width = `${pct}%`;
-
-    closeTaskModal();
-    updateBaseCompassHint();
-
-    if (done >= total) {
-        setTimeout(() => {
-            stopArenaLoop();
-            initFlightPhase('flight_back');
-        }, 900);
-    }
+    lockGamePointer();
 }
 
 function openTaskMinigame(task) {
@@ -1154,241 +1337,468 @@ function openTaskMinigame(task) {
     title.innerText = `${task.title} — ${task.roomName}`;
     modal.classList.remove('hidden');
 
+    const onHardwareSuccess = () => {
+        renderNasaQuestionStep(body, task, () => {
+            completedTaskIds.add(task.id);
+            MP.reportTaskCompleted(GAME_STATE.selectedRole.id, task.id);
+            refreshTerminalsVisualState();
+
+            const doneCount = completedTaskIds.size;
+            const totalCount = activeMissionTasks.length;
+            const pct = Math.round((doneCount / totalCount) * 100);
+
+            document.getElementById('secondary-bar-label').innerText = `📋 Tareas de ${GAME_STATE.selectedRole.short}: ${doneCount}/${totalCount}`;
+            document.getElementById('secondary-bar-fill').style.width = `${pct}%`;
+            document.getElementById('samples-counter').innerText = `📋 Tareas ${GAME_STATE.selectedRole.short}: ${doneCount} / ${totalCount}`;
+
+            closeTaskModal();
+            updateBaseCompassHint();
+
+            if (doneCount >= totalCount) {
+                setTimeout(() => {
+                    stopArenaLoop();
+                    initFlightPhase('flight_back');
+                }, 750);
+            }
+        });
+    };
+
+    if (task.type === 'sequence') renderSequenceMinigame(body, onHardwareSuccess);
+    else if (task.type === 'timing') renderTimingMinigame(body, onHardwareSuccess);
+    else if (task.type === 'wires') renderWiresMinigame(body, onHardwareSuccess);
+    else if (task.type === 'slider') renderSliderMinigame(body, onHardwareSuccess);
+    else if (task.type === 'temp') renderTempMinigame(body, onHardwareSuccess);
+    else if (task.type === 'orbit_sync') renderOrbitSyncMinigame(body, onHardwareSuccess);
+    else if (task.type === 'power_balance') renderPowerBalanceMinigame(body, onHardwareSuccess);
+    else if (task.type === 'dish_align') renderDishAlignMinigame(body, onHardwareSuccess);
+    else if (task.type === 'fuel_mix') renderFuelMixMinigame(body, onHardwareSuccess);
+    else if (task.type === 'binary_decode') renderBinaryDecodeMinigame(body, onHardwareSuccess);
+    else if (task.type === 'shields_charge') renderShieldsChargeMinigame(body, onHardwareSuccess);
+    else renderRivetsMinigame(body, onHardwareSuccess);
+}
+
+function renderNasaQuestionStep(body, task, onFinalComplete) {
+    // Mezclar el orden de las opciones en cada terminal manteniendo rastreada la respuesta correcta
+    const mappedOptions = task.nasaOptions.map((text, idx) => ({
+        text,
+        isCorrect: idx === task.correctIdx
+    }));
+    for (let i = mappedOptions.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [mappedOptions[i], mappedOptions[j]] = [mappedOptions[j], mappedOptions[i]];
+    }
+
     body.innerHTML = `
-        <div class="minigame-box">
-            <div style="background:rgba(56,189,248,0.14); border:1px solid #38bdf8; border-radius:10px; padding:10px 12px; margin-bottom:12px; font-size:0.86rem; color:#e0f2fe;">
-                🛰️ <strong>Dato NASA:</strong> ${task.nasaFact}
-            </div>
-            <p style="font-weight:700; color:#f8fafc; margin-bottom:10px; font-size:0.95rem;">
-                ${task.nasaQuestion}
-            </p>
-            <div style="display:flex; flex-direction:column; gap:8px;">
-                ${task.nasaOptions.map((opt, idx) => `
-                    <button class="option-card nasa-opt-btn" data-opt="${idx}" style="text-align:center; font-weight:600;">
-                        ${opt}
-                    </button>
-                `).join('')}
-            </div>
-            <p id="nasa-quiz-msg" style="color:#fbbf24; font-weight:600; margin-top:10px; min-height:20px;"></p>
+        <div style="background:rgba(14,165,233,0.16); border:1.5px solid #38bdf8; border-radius:12px; padding:13px; margin-bottom:14px; font-size:0.9rem; color:#e0f2fe; line-height:1.45;">
+            🛰️ <strong>Dato de Ingeniería NASA:</strong> ${task.nasaFact}
         </div>
+        <p style="font-weight:700; margin-bottom:14px; font-size:1.02rem; color:#ffffff;">${task.nasaQuestion}</p>
+        <div style="display:flex; flex-direction:column; gap:10px;">
+            ${mappedOptions.map((opt, idx) => `
+                <button class="nasa-opt-btn" data-correct="${opt.isCorrect ? '1' : '0'}" style="text-align:left; cursor:pointer;">
+                    <span style="color:#38bdf8; font-weight:800; margin-right:8px;">${String.fromCharCode(65 + idx)}.</span> ${opt.text}
+                </button>
+            `).join('')}
+        </div>
+        <p id="nasa-q-feedback" style="margin-top:12px; font-size:0.88rem; font-weight:700;"></p>
     `;
 
     body.querySelectorAll('.nasa-opt-btn').forEach(btn => {
         btn.onclick = () => {
-            const chosen = parseInt(btn.dataset.opt, 10);
-            if (chosen === task.correctIdx) {
-                renderTerminalControlStep(task, body);
+            const isCorrect = btn.dataset.correct === '1';
+            const fb = document.getElementById('nasa-q-feedback');
+            if (isCorrect) {
+                btn.style.background = '#065f46';
+                btn.style.borderColor = '#10b981';
+                fb.style.color = '#34d399';
+                fb.innerText = '✅ ¡Correcto! Telemetría verificada y registrada.';
+                setTimeout(onFinalComplete, 650);
             } else {
-                document.getElementById('nasa-quiz-msg').innerText = '⚠️ Respuesta incorrecta. Revisa el dato NASA arriba e intenta otra opción.';
+                btn.style.background = '#7f1d1d';
+                btn.style.borderColor = '#ef4444';
+                fb.style.color = '#fca5a5';
+                fb.innerText = '❌ Dato incorrecto. Revisa el principio científico NASA de arriba e intenta otra opción.';
             }
         };
     });
 }
 
-function renderTerminalControlStep(task, body) {
-    if (task.type === 'sequence') {
-        const nums = [1, 2, 3, 4].sort(() => Math.random() - 0.5);
-        let expected = 1;
-        body.innerHTML = `
-            <div class="minigame-box">
-                <p style="color:#cbd5e1;">Pulsa los nodos en orden ascendente (<strong>1 → 2 → 3 → 4</strong>):</p>
-                <div class="seq-grid">
-                    ${nums.map(n => `<button class="seq-btn" data-num="${n}">${n}</button>`).join('')}
-                </div>
-                <p id="seq-msg" style="color:#38bdf8; font-weight:600; min-height:22px;"></p>
+// 1. Secuencia ascendente 1 al 8
+function renderSequenceMinigame(body, onSuccess) {
+    const nums = [1, 2, 3, 4, 5, 6, 7, 8].sort(() => Math.random() - 0.5);
+    let expected = 1;
+    body.innerHTML = `
+        <div class="minigame-box">
+            <p>Pulsa los nodos de telemetría en orden ascendente del <strong>1 al 8</strong>:</p>
+            <div class="seq-grid">
+                ${nums.map(n => `<button class="seq-btn" data-num="${n}">${n}</button>`).join('')}
             </div>
-        `;
-        body.querySelectorAll('.seq-btn').forEach(btn => {
-            btn.onclick = () => {
-                const val = parseInt(btn.dataset.num, 10);
-                if (val === expected) {
-                    btn.classList.add('done');
-                    expected++;
-                    if (expected > 4) completeCurrentTask(task);
-                } else {
-                    expected = 1;
-                    body.querySelectorAll('.seq-btn').forEach(b => b.classList.remove('done'));
-                    document.getElementById('seq-msg').innerText = '⚠️ Orden incorrecto, secuencia reiniciada.';
-                }
-            };
-        });
-
-    } else if (task.type === 'timing') {
-        body.innerHTML = `
-            <div class="minigame-box">
-                <p style="color:#cbd5e1;">Detén el cursor azul dentro de la <strong>zona verde central</strong>:</p>
-                <div class="drill-meter">
-                    <div class="drill-target-zone"></div>
-                    <div class="drill-cursor" id="timing-cursor" style="left:10%;"></div>
-                </div>
-                <button id="timing-lock-btn" class="btn-primary">⚡ FIJAR ESTABILIZADOR</button>
-                <p id="timing-msg" style="color:#fbbf24; font-weight:600; margin-top:8px;"></p>
-            </div>
-        `;
-        let pos = 5;
-        let dir = 1;
-        const cursor = document.getElementById('timing-cursor');
-        const interval = setInterval(() => {
-            if (!isTaskModalOpen) { clearInterval(interval); return; }
-            pos += dir * 2.4;
-            if (pos >= 94) { pos = 94; dir = -1; }
-            if (pos <= 2) { pos = 2; dir = 1; }
-            cursor.style.left = pos + '%';
-        }, 25);
-
-        document.getElementById('timing-lock-btn').onclick = () => {
-            if (pos >= 35 && pos <= 65) {
-                clearInterval(interval);
-                completeCurrentTask(task);
+        </div>
+    `;
+    body.querySelectorAll('.seq-btn').forEach(btn => {
+        btn.onclick = () => {
+            const val = parseInt(btn.dataset.num, 10);
+            if (val === expected) {
+                btn.classList.add('done');
+                btn.disabled = true;
+                expected++;
+                if (expected > 8) onSuccess();
             } else {
-                document.getElementById('timing-msg').innerText = '⚠️ Fuera de rango óptimo, intenta nuevamente.';
+                expected = 1;
+                body.querySelectorAll('.seq-btn').forEach(b => {
+                    b.classList.remove('done');
+                    b.disabled = false;
+                });
             }
         };
-
-    } else if (task.type === 'slider') {
-        const targetVal = Math.floor(25 + Math.random() * 55);
-        body.innerHTML = `
-            <div class="minigame-box">
-                <p style="color:#cbd5e1;">Ajusta el dial hasta alcanzar <strong style="color:#10b981; font-size:1.15rem;">${targetVal}.0 MHz</strong>:</p>
-                <input type="range" id="freq-slider" min="10" max="90" value="50" style="width:100%; margin:20px 0; accent-color:#38bdf8;">
-                <div style="font-size:1.3rem; font-weight:800; color:#38bdf8; margin-bottom:12px;">Lectura Actual: <span id="freq-readout">50</span>.0 MHz</div>
-                <button id="freq-confirm-btn" class="btn-primary">📡 BLOQUEAR FRECUENCIA</button>
-                <p id="freq-msg" style="color:#fbbf24; font-weight:600; margin-top:8px;"></p>
-            </div>
-        `;
-        const slider = document.getElementById('freq-slider');
-        const readout = document.getElementById('freq-readout');
-        slider.oninput = () => { readout.innerText = slider.value; };
-        document.getElementById('freq-confirm-btn').onclick = () => {
-            const diff = Math.abs(parseInt(slider.value, 10) - targetVal);
-            if (diff <= 2) {
-                completeCurrentTask(task);
-            } else {
-                document.getElementById('freq-msg').innerText = `⚠️ Acércate más a ${targetVal}.0 MHz.`;
-            }
-        };
-
-    } else if (task.type === 'wires') {
-        const wires = [
-            { id: 'red', label: 'Bus Rojo', color: '#ef4444' },
-            { id: 'blue', label: 'Bus Azul', color: '#3b82f6' },
-            { id: 'green', label: 'Bus Verde', color: '#10b981' },
-            { id: 'amber', label: 'Bus Ámbar', color: '#f59e0b' }
-        ];
-        const rightWires = [...wires].sort(() => Math.random() - 0.5);
-        let selectedLeft = null;
-        let connectedCount = 0;
-
-        body.innerHTML = `
-            <div class="minigame-box">
-                <p style="color:#cbd5e1;">Conecta cada terminal izquierda con su par del mismo color a la derecha:</p>
-                <div class="wire-grid">
-                    <div class="wire-col">
-                        ${wires.map(w => `<button class="wire-node" data-side="L" data-wid="${w.id}" style="background:${w.color};">${w.label}</button>`).join('')}
-                    </div>
-                    <div class="wire-col">
-                        ${rightWires.map(w => `<button class="wire-node" data-side="R" data-wid="${w.id}" style="background:${w.color};">${w.label}</button>`).join('')}
-                    </div>
-                </div>
-            </div>
-        `;
-
-        body.querySelectorAll('.wire-node').forEach(btn => {
-            btn.onclick = () => {
-                if (btn.classList.contains('connected')) return;
-                const side = btn.dataset.side;
-                const wid = btn.dataset.wid;
-
-                if (side === 'L') {
-                    body.querySelectorAll('[data-side="L"]').forEach(b => b.classList.remove('active'));
-                    btn.classList.add('active');
-                    selectedLeft = btn;
-                } else if (side === 'R' && selectedLeft) {
-                    if (selectedLeft.dataset.wid === wid) {
-                        selectedLeft.classList.remove('active');
-                        selectedLeft.classList.add('connected');
-                        btn.classList.add('connected');
-                        selectedLeft = null;
-                        connectedCount++;
-                        if (connectedCount >= 4) completeCurrentTask(task);
-                    } else {
-                        selectedLeft.classList.remove('active');
-                        selectedLeft = null;
-                    }
-                }
-            };
-        });
-
-    } else if (task.type === 'temp') {
-        let currentTemp = -12;
-        const targetTemp = -45;
-        body.innerHTML = `
-            <div class="minigame-box">
-                <p style="color:#cbd5e1;">Estabiliza la cámara criogénica a <strong style="color:#38bdf8;">${targetTemp}°C</strong>:</p>
-                <div class="temp-controls">
-                    <button class="temp-btn" id="temp-down" style="background:#0284c7;">❄️ -11°C</button>
-                    <div id="temp-display" style="font-size:1.8rem; font-weight:800; min-width:110px;">${currentTemp}°C</div>
-                    <button class="temp-btn" id="temp-up" style="background:#ea580c;">🔥 +5°C</button>
-                </div>
-                <button id="temp-confirm" class="btn-primary">✓ SELLAR CÁMARA CRIOGÉNICA</button>
-            </div>
-        `;
-        const disp = document.getElementById('temp-display');
-        document.getElementById('temp-down').onclick = () => {
-            currentTemp -= 11;
-            disp.innerText = `${currentTemp}°C`;
-        };
-        document.getElementById('temp-up').onclick = () => {
-            currentTemp += 5;
-            disp.innerText = `${currentTemp}°C`;
-        };
-        document.getElementById('temp-confirm').onclick = () => {
-            if (Math.abs(currentTemp - targetTemp) <= 3) completeCurrentTask(task);
-        };
-
-    } else {
-        const spots = [
-            { top: '18%', left: '15%' },
-            { top: '22%', left: '75%' },
-            { top: '50%', left: '46%' },
-            { top: '72%', left: '22%' },
-            { top: '70%', left: '72%' }
-        ];
-        let sealed = 0;
-        body.innerHTML = `
-            <div class="minigame-box">
-                <p style="color:#cbd5e1;">Haz clic en los <strong>5 puntos rojos</strong> para soldar la compuerta:</p>
-                <div class="rivet-panel">
-                    ${spots.map((s, i) => `<button class="rivet-spot" data-idx="${i}" style="top:${s.top}; left:${s.left};">!</button>`).join('')}
-                </div>
-            </div>
-        `;
-        body.querySelectorAll('.rivet-spot').forEach(btn => {
-            btn.onclick = () => {
-                if (btn.classList.contains('sealed')) return;
-                btn.classList.add('sealed');
-                btn.innerText = '✓';
-                sealed++;
-                if (sealed >= spots.length) completeCurrentTask(task);
-            };
-        });
-    }
+    });
 }
 
-function showMissionReport(success, message) {
-    unlockGamePointer();
+// 2. Pulso de precisión (Escudo térmico / Frenado)
+function renderTimingMinigame(body, onSuccess) {
+    let pos = 0;
+    let dir = 1;
+    let hits = 0;
+    body.innerHTML = `
+        <div class="minigame-box">
+            <p>Detén el indicador en la <strong>zona verde</strong> (2 veces) para estabilizar la maniobra:</p>
+            <div class="drill-meter">
+                <div class="drill-target-zone"></div>
+                <div id="timing-cursor" class="drill-cursor" style="left:0%;"></div>
+            </div>
+            <p id="timing-status" style="font-size:0.86rem; color:#38bdf8; margin-bottom:10px; font-weight:700;">Aciertos: 0 / 2</p>
+            <button id="timing-hit-btn" class="btn-primary">⚡ ACTIVAR PULSO</button>
+        </div>
+    `;
+    const cursor = document.getElementById('timing-cursor');
+    const interval = setInterval(() => {
+        if (!document.getElementById('timing-cursor')) {
+            clearInterval(interval);
+            return;
+        }
+        pos += dir * 2.1;
+        if (pos >= 96) { pos = 96; dir = -1; }
+        if (pos <= 0) { pos = 0; dir = 1; }
+        cursor.style.left = `${pos}%`;
+    }, 22);
+
+    document.getElementById('timing-hit-btn').onclick = () => {
+        if (pos >= 34 && pos <= 66) {
+            hits++;
+            document.getElementById('timing-status').innerText = `Aciertos: ${hits} / 2`;
+            if (hits >= 2) {
+                clearInterval(interval);
+                onSuccess();
+            }
+        } else {
+            document.getElementById('timing-status').innerText = `❌ Fuera de rango. Aciertos: ${hits} / 2`;
+        }
+    };
+}
+
+// 3. Empalme de circuitos redundantes
+function renderWiresMinigame(body, onSuccess) {
+    const colors = [
+        { id: 'c1', name: 'BUS ALFA', css: '#ef4444' },
+        { id: 'c2', name: 'BUS BETA', css: '#3b82f6' },
+        { id: 'c3', name: 'BUS GAMMA', css: '#eab308' },
+        { id: 'c4', name: 'BUS DELTA', css: '#10b981' }
+    ];
+    const rightColors = [...colors].sort(() => Math.random() - 0.5);
+    let selectedLeft = null;
+    let connected = 0;
+
+    body.innerHTML = `
+        <div class="minigame-box">
+            <p>Conecta cada línea de potencia redundante con su terminal del mismo color:</p>
+            <div class="wire-grid">
+                <div class="wire-col">
+                    ${colors.map(c => `<button class="wire-node" data-side="L" data-cid="${c.id}" style="background:${c.css};">${c.name}</button>`).join('')}
+                </div>
+                <div class="wire-col">
+                    ${rightColors.map(c => `<button class="wire-node" data-side="R" data-cid="${c.id}" style="background:${c.css};">${c.name}</button>`).join('')}
+                </div>
+            </div>
+        </div>
+    `;
+
+    body.querySelectorAll('.wire-node').forEach(btn => {
+        btn.onclick = () => {
+            if (btn.classList.contains('connected')) return;
+            if (btn.dataset.side === 'L') {
+                body.querySelectorAll('[data-side="L"]').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                selectedLeft = btn;
+            } else if (selectedLeft) {
+                if (selectedLeft.dataset.cid === btn.dataset.cid) {
+                    selectedLeft.classList.remove('active');
+                    selectedLeft.classList.add('connected');
+                    btn.classList.add('connected');
+                    selectedLeft = null;
+                    connected++;
+                    if (connected >= 4) onSuccess();
+                } else {
+                    selectedLeft.classList.remove('active');
+                    selectedLeft = null;
+                }
+            }
+        };
+    });
+}
+
+// 4. Calibrador de frecuencia / retardo orbital
+function renderSliderMinigame(body, onSuccess) {
+    const targetHz = 115 + Math.floor(Math.random() * 55);
+    body.innerHTML = `
+        <div class="minigame-box">
+            <p>Ajusta la frecuencia del transmisor exactamente a <strong>${targetHz} MHz</strong>:</p>
+            <h3 id="slider-val-display" style="text-align:center; color:#38bdf8; margin:12px 0; font-size:1.5rem;">100 MHz</h3>
+            <input type="range" id="freq-slider" min="100" max="180" value="100" style="width:100%;" />
+            <button id="verify-slider-btn" class="btn-primary" style="margin-top:14px;">✓ SINCRONIZAR FRECUENCIA</button>
+        </div>
+    `;
+    const slider = document.getElementById('freq-slider');
+    const disp = document.getElementById('slider-val-display');
+    slider.oninput = () => {
+        disp.innerText = `${slider.value} MHz`;
+    };
+    document.getElementById('verify-slider-btn').onclick = () => {
+        if (Math.abs(parseInt(slider.value, 10) - targetHz) <= 2) {
+            onSuccess();
+        } else {
+            disp.style.color = '#ef4444';
+        }
+    };
+}
+
+// 5. Regulador térmico criogénico
+function renderTempMinigame(body, onSuccess) {
+    let temp = 42;
+    const goal = 20;
+    body.innerHTML = `
+        <div class="minigame-box">
+            <p>Estabiliza la cámara térmica exactamente a <strong>${goal} °C</strong>:</p>
+            <div class="temp-controls">
+                <button id="temp-down" class="temp-btn" style="background:#0284c7;">-4 °C</button>
+                <span id="temp-readout" style="font-size:1.8rem; font-weight:800;">${temp} °C</span>
+                <button id="temp-up" class="temp-btn" style="background:#ea580c;">+3 °C</button>
+            </div>
+            <button id="temp-lock-btn" class="btn-primary">✓ FIJAR TEMPERATURA</button>
+        </div>
+    `;
+    const readout = document.getElementById('temp-readout');
+    document.getElementById('temp-down').onclick = () => {
+        temp -= 4;
+        readout.innerText = `${temp} °C`;
+    };
+    document.getElementById('temp-up').onclick = () => {
+        temp += 3;
+        readout.innerText = `${temp} °C`;
+    };
+    document.getElementById('temp-lock-btn').onclick = () => {
+        if (temp === goal) onSuccess();
+    };
+}
+
+// 6. Sellado de compuertas presurizadas
+function renderRivetsMinigame(body, onSuccess) {
+    let sealed = 0;
+    const coords = [
+        { top: '18%', left: '16%' },
+        { top: '18%', left: '74%' },
+        { top: '48%', left: '45%' },
+        { top: '72%', left: '22%' },
+        { top: '72%', left: '70%' }
+    ];
+    body.innerHTML = `
+        <div class="minigame-box">
+            <p>Presiona las <strong>5 válvulas de vacío</strong> para presurizar la compuerta:</p>
+            <div class="rivet-panel">
+                ${coords.map((c, i) => `<button class="rivet-spot" style="top:${c.top}; left:${c.left};" data-idx="${i}">!</button>`).join('')}
+            </div>
+        </div>
+    `;
+    body.querySelectorAll('.rivet-spot').forEach(btn => {
+        btn.onclick = () => {
+            if (btn.classList.contains('sealed')) return;
+            btn.classList.add('sealed');
+            btn.innerText = '✓';
+            sealed++;
+            if (sealed >= 5) onSuccess();
+        };
+    });
+}
+
+// 7. Sincronizador de Órbita / Rotor (NUEVO)
+function renderOrbitSyncMinigame(body, onSuccess) {
+    let angle = 0;
+    let locked = 0;
+    body.innerHTML = `
+        <div class="minigame-box" style="text-align:center;">
+            <p>Pulsa <strong>CAPTURAR ÁNGULO</strong> cuando el satélite pase por el arco superior verde (<strong>340° - 20°</strong>):</p>
+            <div style="position:relative; width:150px; height:150px; margin:16px auto; border:3px solid #334155; border-radius:50%;">
+                <div style="position:absolute; top:-6px; left:52px; width:42px; height:12px; background:#10b981; border-radius:6px;"></div>
+                <div id="orbit-dot" style="position:absolute; width:16px; height:16px; background:#38bdf8; border-radius:50%; top:65px; left:65px;"></div>
+            </div>
+            <p id="orbit-status" style="color:#38bdf8; font-weight:700; margin-bottom:10px;">Capturas: 0 / 2</p>
+            <button id="orbit-cap-btn" class="btn-primary">🛰️ CAPTURAR ÁNGULO ORBITAL</button>
+        </div>
+    `;
+    const dot = document.getElementById('orbit-dot');
+    const timer = setInterval(() => {
+        if (!document.getElementById('orbit-dot')) { clearInterval(timer); return; }
+        angle = (angle + 5) % 360;
+        const rad = (angle - 90) * (Math.PI / 180);
+        dot.style.left = `${67 + Math.cos(rad) * 64}px`;
+        dot.style.top = `${67 + Math.sin(rad) * 64}px`;
+    }, 24);
+
+    document.getElementById('orbit-cap-btn').onclick = () => {
+        if (angle <= 24 || angle >= 336) {
+            locked++;
+            document.getElementById('orbit-status').innerText = `Capturas: ${locked} / 2`;
+            if (locked >= 2) { clearInterval(timer); onSuccess(); }
+        } else {
+            document.getElementById('orbit-status').innerText = `❌ Desfase orbital (${angle}°). Capturas: ${locked} / 2`;
+        }
+    };
+}
+
+// 8. Balanceador de Energía Solar / Nuclear (NUEVO)
+function renderPowerBalanceMinigame(body, onSuccess) {
+    let total = 0;
+    const target = 100;
+    body.innerHTML = `
+        <div class="minigame-box" style="text-align:center;">
+            <p>Suma exactamente <strong>100 MW</strong> de carga eléctrica combinando los módulos:</p>
+            <h3 id="pwr-val" style="font-size:1.7rem; color:#fbbf24; margin:12px 0;">0 / 100 MW</h3>
+            <div style="display:flex; gap:10px; justify-content:center; margin-bottom:12px;">
+                <button class="temp-btn" style="background:#0284c7;" data-add="15">+15 MW</button>
+                <button class="temp-btn" style="background:#0284c7;" data-add="25">+25 MW</button>
+                <button class="temp-btn" style="background:#0284c7;" data-add="40">+40 MW</button>
+                <button id="pwr-reset" class="temp-btn" style="background:#475569;">Reset</button>
+            </div>
+        </div>
+    `;
+    const disp = document.getElementById('pwr-val');
+    body.querySelectorAll('[data-add]').forEach(b => {
+        b.onclick = () => {
+            total += parseInt(b.dataset.add, 10);
+            disp.innerText = `${total} / 100 MW`;
+            if (total === target) onSuccess();
+            else if (total > target) {
+                disp.style.color = '#ef4444';
+                setTimeout(() => { total = 0; disp.style.color = '#fbbf24'; disp.innerText = '0 / 100 MW'; }, 500);
+            }
+        };
+    });
+    document.getElementById('pwr-reset').onclick = () => {
+        total = 0;
+        disp.style.color = '#fbbf24';
+        disp.innerText = '0 / 100 MW';
+    };
+}
+
+// 9. Alineador de Antena de Espacio Profundo (NUEVO)
+function renderDishAlignMinigame(body, onSuccess) {
+    let az = 20;
+    let el = 75;
+    body.innerHTML = `
+        <div class="minigame-box">
+            <p>Orienta la antena parabólica a <strong>Azimut 50°</strong> y <strong>Elevación 45°</strong>:</p>
+            <div style="margin:12px 0;">
+                <label>Azimut: <strong id="az-lbl">20°</strong></label>
+                <input type="range" id="az-rng" min="0" max="90" value="20" style="width:100%;" />
+            </div>
+            <div style="margin:12px 0;">
+                <label>Elevación: <strong id="el-lbl">75°</strong></label>
+                <input type="range" id="el-rng" min="0" max="90" value="75" style="width:100%;" />
+            </div>
+            <button id="dish-ok-btn" class="btn-primary">📡 BLOQUEAR SEÑAL NASA</button>
+        </div>
+    `;
+    const azR = document.getElementById('az-rng');
+    const elR = document.getElementById('el-rng');
+    azR.oninput = () => { az = parseInt(azR.value, 10); document.getElementById('az-lbl').innerText = `${az}°`; };
+    elR.oninput = () => { el = parseInt(elR.value, 10); document.getElementById('el-lbl').innerText = `${el}°`; };
+    document.getElementById('dish-ok-btn').onclick = () => {
+        if (Math.abs(az - 50) <= 3 && Math.abs(el - 45) <= 3) onSuccess();
+    };
+}
+
+// 10. Decodificador Binario de Telemetría (NUEVO)
+function renderBinaryDecodeMinigame(body, onSuccess) {
+    const bits = [0, 0, 0, 0];
+    const target = [1, 0, 1, 1];
+    body.innerHTML = `
+        <div class="minigame-box" style="text-align:center;">
+            <p>Configura el código de paridad de telemetría en <strong>1 - 0 - 1 - 1</strong>:</p>
+            <div style="display:flex; gap:12px; justify-content:center; margin:16px 0;">
+                ${bits.map((b, i) => `<button class="seq-btn" data-bi="${i}" style="width:62px;">0</button>`).join('')}
+            </div>
+        </div>
+    `;
+    body.querySelectorAll('[data-bi]').forEach(btn => {
+        btn.onclick = () => {
+            const idx = parseInt(btn.dataset.bi, 10);
+            bits[idx] = bits[idx] === 0 ? 1 : 0;
+            btn.innerText = bits[idx];
+            btn.style.background = bits[idx] === 1 ? '#0284c7' : '#1e293b';
+            if (bits.every((v, k) => v === target[k])) onSuccess();
+        };
+    });
+}
+
+// 11. Mezcla Química ISRU (Oxígeno / Propelente) (NUEVO)
+function renderFuelMixMinigame(body, onSuccess) {
+    let o2 = 30;
+    body.innerHTML = `
+        <div class="minigame-box" style="text-align:center;">
+            <p>Ajusta la pureza de oxígeno extraído al <strong>80%</strong> pulsando el sintetizador:</p>
+            <h3 id="mix-pct" style="font-size:1.6rem; color:#10b981; margin:12px 0;">Pureza: 30%</h3>
+            <button id="mix-pump-btn" class="btn-primary">🧪 INYECTAR CATALIZADOR (+10%)</button>
+        </div>
+    `;
+    document.getElementById('mix-pump-btn').onclick = () => {
+        o2 += 10;
+        document.getElementById('mix-pct').innerText = `Pureza: ${o2}%`;
+        if (o2 >= 80) onSuccess();
+    };
+}
+
+// 12. Carga de Escudo Electrodinámico (NUEVO)
+function renderShieldsChargeMinigame(body, onSuccess) {
+    let charge = 0;
+    body.innerHTML = `
+        <div class="minigame-box" style="text-align:center;">
+            <p>Pulsa repetidamente para cargar los capacitores del escudo al <strong>100%</strong>:</p>
+            <div class="progress-track" style="height:18px; margin:14px 0;"><div id="sh-fill" class="progress-fill cyan" style="width:0%;"></div></div>
+            <button id="sh-tap-btn" class="btn-primary">⚡ CARGAR CAPACITOR</button>
+        </div>
+    `;
+    document.getElementById('sh-tap-btn').onclick = () => {
+        charge = Math.min(100, charge + 20);
+        document.getElementById('sh-fill').style.width = `${charge}%`;
+        if (charge >= 100) onSuccess();
+    };
+}
+
+function showMissionReport(success, desc) {
+    resetAllInputStates();
+    document.getElementById('sector-radar-box').classList.add('hidden');
     const modal = document.getElementById('report-modal');
     const title = document.getElementById('report-title');
-    const desc = document.getElementById('report-desc');
-    const statsBox = document.getElementById('report-stats');
+    const descEl = document.getElementById('report-desc');
+    const statsEl = document.getElementById('report-stats');
 
-    title.innerText = success ? '🎉 ¡Misión Completada con Éxito!' : '⚠️ Misión Abortada';
-    desc.innerText = message;
+    title.innerText = success ? '🏆 Misión Cumplida con Éxito' : '⚠️ Misión Interrumpida';
+    title.style.color = success ? '#10b981' : '#ef4444';
+    descEl.innerText = desc;
 
-    statsBox.innerHTML = `
-        <div><small style="color:#94a3b8;">DESTINO</small><br><strong>${GAME_STATE.selectedMission.name}</strong></div>
-        <div><small style="color:#94a3b8;">ROL EJERCIDO</small><br><strong>${GAME_STATE.selectedRole.short}</strong></div>
-        <div><small style="color:#94a3b8;">SALDO TOTAL</small><br><strong style="color:#fbbf24;">${GAME_STATE.credits} CR</strong></div>
+    statsEl.innerHTML = `
+        <div><small style="color:#94a3b8;">Tareas Completadas</small><br><strong>${completedTaskIds.size} / ${activeMissionTasks.length}</strong></div>
+        <div><small style="color:#94a3b8;">Oxígeno Restante</small><br><strong>${Math.round((suitOxygen / maxSuitOxygen) * 100)}%</strong></div>
+        <div><small style="color:#94a3b8;">Créditos Totales</small><br><strong style="color:#fbbf24;">${GAME_STATE.credits} CR</strong></div>
     `;
 
     modal.classList.remove('hidden');
