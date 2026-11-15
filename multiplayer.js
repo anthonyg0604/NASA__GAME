@@ -35,6 +35,7 @@ const MP = {
     guestConns: [],
     players: {},
     takenRolesByOthers: {}, // { roleId: playerName }
+    completedTasksByRole: {}, // { roleId: [taskId1, taskId2] }
     lastSendTime: 0,
     lastPeekedCode: '',
 
@@ -112,11 +113,13 @@ const MP = {
         };
 
         document.getElementById('start-session-btn').onclick = () => {
+            if (typeof resetAllInputStates === 'function') resetAllInputStates();
             document.getElementById('lobby-modal').classList.add('hidden');
             this.updateHudBadge();
             if (this.isHost && this.peer && this.peer.disconnected) {
                 try { this.peer.reconnect(); } catch (_) {}
             }
+            if (typeof lockGamePointer === 'function') lockGamePointer();
         };
 
         const joinInput = document.getElementById('join-code-input');
@@ -151,11 +154,50 @@ const MP = {
         };
 
         document.getElementById('room-info-pill').onclick = () => {
+            if (typeof resetAllInputStates === 'function') resetAllInputStates();
+            if (typeof unlockGamePointer === 'function') unlockGamePointer();
             this.refreshTakenRolesFromPlayers();
             this.renderLobbyRoles();
             this.renderPlayersList();
             document.getElementById('lobby-modal').classList.remove('hidden');
         };
+    },
+
+    getActiveRolesInMatch() {
+        const order = ['commander', 'engineer', 'scientist', 'comms'];
+        const present = new Set(Object.values(this.players).map(p => p.roleId).filter(Boolean));
+        present.add(GAME_STATE.selectedRole.id);
+        return order.filter(rid => present.has(rid));
+    },
+
+    resetMissionTaskState() {
+        this.completedTasksByRole = {};
+    },
+
+    reportTaskCompleted(roleId, taskId) {
+        if (!this.completedTasksByRole[roleId]) {
+            this.completedTasksByRole[roleId] = [];
+        }
+        if (!this.completedTasksByRole[roleId].includes(taskId)) {
+            this.completedTasksByRole[roleId].push(taskId);
+        }
+
+        if (this.isHost) {
+            this.broadcastTaskState();
+        } else if (this.hostConn && this.hostConn.open) {
+            this.hostConn.send({ type: 'TASK_DONE', roleId, taskId });
+        }
+    },
+
+    broadcastTaskState() {
+        if (!this.isHost) return;
+        const payload = {
+            type: 'TASK_STATE',
+            completedTasksByRole: this.completedTasksByRole
+        };
+        this.guestConns.forEach(c => {
+            if (c.open) c.send(payload);
+        });
     },
 
     refreshTakenRolesFromPlayers() {
@@ -207,7 +249,6 @@ const MP = {
         const grid = document.getElementById('lobby-role-grid');
         if (!grid) return;
 
-        // Si el rol actual quedó ocupado por otro jugador, cambiar automáticamente a uno libre
         if (this.takenRolesByOthers[GAME_STATE.selectedRole.id]) {
             const firstFree = GAME_DATA.roles.find(r => !this.takenRolesByOthers[r.id]);
             if (firstFree) {
@@ -236,7 +277,7 @@ const MP = {
         grid.querySelectorAll('.role-mini-item').forEach(el => {
             el.onclick = () => {
                 const roleId = el.dataset.role;
-                if (this.takenRolesByOthers[roleId]) return; // Bloqueado porque ya lo tomó otro jugador
+                if (this.takenRolesByOthers[roleId]) return;
 
                 const role = GAME_DATA.roles.find(r => r.id === roleId);
                 GAME_STATE.selectedRole = role;
@@ -347,7 +388,7 @@ const MP = {
         try {
             this.peer = new Peer('nasa-cubo-phora-' + this.roomCode, PEER_ICE_CONFIG);
             this.peer.on('open', () => {
-                badge.innerText = `● Sala Online #${this.roomCode}`;
+                badge.innerText = `● Sala Online #${this.roomCode} (Anfitrión)`;
             });
             this.peer.on('connection', conn => {
                 this.guestConns = this.guestConns.filter(c => c.open);
@@ -413,7 +454,6 @@ const MP = {
                 return;
             }
 
-            // Garantizar que el rol del invitado sea único y no esté ocupado por otro humano
             const usedHumanRoles = new Set(existingHumans.map(p => p.roleId));
             let finalRoleId = data.player.roleId;
             if (usedHumanRoles.has(finalRoleId)) {
@@ -446,10 +486,15 @@ const MP = {
             this.guestConns.forEach(c => {
                 if (c !== conn && c.open) c.send(data);
             });
+
+        } else if (data.type === 'TASK_DONE') {
+            this.reportTaskCompleted(data.roleId, data.taskId);
+            if (typeof onRemoteTaskStateUpdated === 'function') {
+                onRemoteTaskStateUpdated();
+            }
         }
     },
 
-    // Consulta en vivo los roles ocupados en la sala antes de entrar
     peekRemoteRoomRoles(code) {
         if (typeof Peer === 'undefined') return;
         const feedback = document.getElementById('join-feedback');
@@ -559,7 +604,6 @@ const MP = {
                     const myLocal = this.players[this.myId];
                     this.players = data.players;
 
-                    // Si el anfitrión nos asignó un rol libre distinto, aplicarlo
                     if (this.players[this.myId] && this.players[this.myId].roleId) {
                         const assignedRole = GAME_DATA.roles.find(r => r.id === this.players[this.myId].roleId);
                         if (assignedRole) {
@@ -579,6 +623,7 @@ const MP = {
 
                     if (data.missionId) {
                         GAME_STATE.selectedMission = GAME_DATA.missions.find(m => m.id === data.missionId) || GAME_STATE.selectedMission;
+                        if (typeof updateWindowPlanet === 'function') updateWindowPlanet(GAME_STATE.selectedMission.id);
                         if (typeof updateTopMissionBadge === 'function') updateTopMissionBadge();
                     }
 
@@ -586,8 +631,10 @@ const MP = {
                         rebuildControlCenterAstronaut(astroRig.group.position.clone());
                     }
 
+                    if (typeof resetAllInputStates === 'function') resetAllInputStates();
                     document.getElementById('lobby-modal').classList.add('hidden');
                     this.updateHudBadge();
+                    if (typeof lockGamePointer === 'function') lockGamePointer();
 
                 } else if (data.type === 'MOVE') {
                     if (data.id !== this.myId && this.players[data.id]) {
@@ -595,7 +642,17 @@ const MP = {
                         this.refreshTakenRolesFromPlayers();
                     }
 
+                } else if (data.type === 'TASK_STATE') {
+                    this.completedTasksByRole = data.completedTasksByRole || {};
+                    if (typeof onRemoteTaskStateUpdated === 'function') {
+                        onRemoteTaskStateUpdated();
+                    }
+
                 } else if (data.type === 'LAUNCH') {
+                    if (data.players) {
+                        this.players = data.players;
+                    }
+                    this.resetMissionTaskState();
                     GAME_STATE.selectedMission = GAME_DATA.missions.find(m => m.id === data.missionId) || GAME_STATE.selectedMission;
                     if (typeof beginMissionLaunch === 'function') beginMissionLaunch(true);
                 }
@@ -654,9 +711,11 @@ const MP = {
 
     broadcastLaunch() {
         if (!this.isHost) return;
+        this.resetMissionTaskState();
         const msg = {
             type: 'LAUNCH',
-            missionId: GAME_STATE.selectedMission.id
+            missionId: GAME_STATE.selectedMission.id,
+            players: this.players
         };
         this.guestConns.forEach(c => { if (c.open) c.send(msg); });
     },
