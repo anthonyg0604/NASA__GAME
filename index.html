@@ -22,13 +22,14 @@
             padding: 8px 14px; font-size: 0.84rem; backdrop-filter: blur(8px);
             box-shadow: 0 6px 20px rgba(0,0,0,0.45);
         }
-        .hud-group { display: flex; gap: 10px; align-items: center; }
+        .hud-group { display: flex; gap: 10px; align-items: center; pointer-events: auto; }
 
         /* Barra inferior de controles (solo en Centro de Control) */
         .controls-bar {
             position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%); z-index: 45;
             background: rgba(15, 23, 42, 0.86); border: 1px solid rgba(148, 163, 184, 0.35);
             border-radius: 12px; padding: 8px 16px; display: flex; gap: 16px; font-size: 0.8rem; color: #cbd5e1;
+            white-space: nowrap;
         }
         .controls-bar kbd {
             background: #1e293b; border: 1px solid #475569; border-radius: 5px;
@@ -111,6 +112,7 @@
             background: rgba(220, 38, 38, 0.85); border: 1px solid #f87171; color: #fff;
             padding: 7px 13px; border-radius: 9px; font-weight: 700; cursor: pointer;
         }
+        .btn-danger:hover { background: #dc2626; }
 
         /* Lobby */
         .lobby-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
@@ -125,11 +127,13 @@
             width: 100%; padding: 10px 12px; border-radius: 9px; border: 1px solid #475569;
             background: #1e293b; color: #f8fafc; font-size: 0.92rem; margin-bottom: 10px;
         }
+        .char-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-bottom: 8px; }
         .char-card, .role-mini-item, .player-slot-row {
             background: #1e293b; border: 1px solid #334155; border-radius: 10px;
-            padding: 9px 11px; margin-bottom: 7px; display: flex; align-items: center; justify-content: space-between;
+            padding: 8px 10px; margin-bottom: 6px; display: flex; align-items: center; justify-content: space-between;
             cursor: pointer; color: #f8fafc;
         }
+        .char-card { margin-bottom: 0; }
         .char-card.selected, .role-mini-item.selected { border-color: #38bdf8; background: rgba(14, 165, 233, 0.22); }
         .role-mini-item.taken { opacity: 0.55; cursor: not-allowed; }
         .color-swatch { width: 14px; height: 14px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
@@ -221,9 +225,12 @@
             </div>
             <div class="hud-group">
                 <div class="hud-pill" style="color:#fbbf24; font-weight:800;">💰 <span id="hud-credits">500 CR</span></div>
-                <div class="hud-pill" id="room-info-pill" style="cursor:pointer;">
+                <div class="hud-pill" id="room-info-pill" style="cursor:pointer;" title="Ver tripulación de la sala">
                     🛰️ Sala #<strong id="hud-room-code">0000</strong> (<span id="hud-player-count">1/4</span>)
                 </div>
+                <button id="cc-back-lobby-btn" class="btn-danger" style="padding:8px 13px; font-size:0.82rem;" title="Salir de la sala actual y volver al menú para crear o unirse a otra sala">
+                    ⬅ Volver
+                </button>
             </div>
         </div>
 
@@ -271,7 +278,7 @@
 
     <!-- Modal Sala Multijugador -->
     <div id="lobby-modal" class="modal-backdrop">
-        <div class="modal-card" style="max-width:780px;">
+        <div class="modal-card" style="max-width:800px;">
             <div class="modal-header">
                 <div>
                     <h2>🚀 Tripulación Multijugador — Cubo Phora</h2>
@@ -282,7 +289,7 @@
                 <div>
                     <div class="section-label">1. Tu Nombre y Personaje</div>
                     <input id="player-name-input" class="text-input" maxlength="16" placeholder="Tu nombre de astronauta" />
-                    <div id="lobby-char-grid"></div>
+                    <div id="lobby-char-grid" class="char-grid"></div>
 
                     <div class="section-label">2. Elige tu Especialidad</div>
                     <div id="lobby-role-grid"></div>
