@@ -32,6 +32,249 @@ var baseCamPitch = 0.32;
 const BASE_MAP_SCALE = 1.35;
 let botTaskTimer = 0;
 
+// Sistema de golpes / empujones amistosos entre participantes
+let punchCooldown = 0;
+let selfPunchAnimTimer = 0;
+let selfStunTimer = 0;
+let selfKnockbackX = 0;
+let selfKnockbackZ = 0;
+let punchEffects = [];
+let lastPunchToastAt = 0;
+let arenaAudioCtx = null;
+
+function playPlayfulPunchSound(isHit) {
+    try {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (!AudioCtx) return;
+        if (!arenaAudioCtx) arenaAudioCtx = new AudioCtx();
+        if (arenaAudioCtx.state === 'suspended') arenaAudioCtx.resume();
+
+        const now = arenaAudioCtx.currentTime;
+        const osc = arenaAudioCtx.createOscillator();
+        const gain = arenaAudioCtx.createGain();
+
+        if (isHit) {
+            // Sonido cómico "boing / bonk"
+            osc.type = 'triangle';
+            osc.frequency.setValueAtTime(190, now);
+            osc.frequency.exponentialRampToValueAtTime(520, now + 0.08);
+            osc.frequency.exponentialRampToValueAtTime(140, now + 0.24);
+            gain.gain.setValueAtTime(0.22, now);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+            osc.connect(gain);
+            gain.connect(arenaAudioCtx.destination);
+            osc.start(now);
+            osc.stop(now + 0.26);
+        } else {
+            // Sonido suave de aire al lanzar el golpe
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(340, now);
+            osc.frequency.exponentialRampToValueAtTime(110, now + 0.12);
+            gain.gain.setValueAtTime(0.09, now);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + 0.13);
+            osc.connect(gain);
+            gain.connect(arenaAudioCtx.destination);
+            osc.start(now);
+            osc.stop(now + 0.14);
+        }
+    } catch (_) {}
+}
+
+function createComicBonkSprite(labelText) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 96;
+    const ctx = canvas.getContext('2d');
+
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+    ctx.strokeStyle = '#f59e0b';
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.roundRect(14, 14, 228, 68, 22);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.font = '900 34px system-ui, -apple-system, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#fde047';
+    ctx.fillText(labelText, 128, 50);
+
+    const tex = new THREE.CanvasTexture(canvas);
+    const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, opacity: 1 });
+    const sprite = new THREE.Sprite(mat);
+    sprite.scale.set(2.3, 0.86, 1);
+    return sprite;
+}
+
+function spawnPunchImpactVisuals(worldX, worldY, worldZ, customWord) {
+    if (!arenaScene) return;
+
+    const words = ['¡BONK!', '¡ZAS!', '¡TOING!', '¡BOING!', '¡PAF!'];
+    const word = customWord || words[Math.floor(Math.random() * words.length)];
+
+    // Texto flotante cómico
+    const sprite = createComicBonkSprite(word);
+    sprite.position.set(worldX, worldY + 2.35, worldZ);
+    arenaScene.add(sprite);
+
+    // Onda expansiva en el aire
+    const ringGeo = new THREE.RingGeometry(0.25, 0.45, 24);
+    const ringMat = new THREE.MeshBasicMaterial({
+        color: 0xfbbf24,
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0.9
+    });
+    const ring = new THREE.Mesh(ringGeo, ringMat);
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.set(worldX, worldY + 1.0, worldZ);
+    arenaScene.add(ring);
+
+    // Estrellitas/chispas de impacto
+    const sparks = [];
+    const sparkColors = [0xfef08a, 0x38bdf8, 0xf97316, 0x34d399];
+    for (let i = 0; i < 6; i++) {
+        const ang = (i / 6) * Math.PI * 2;
+        const spark = new THREE.Mesh(
+            new THREE.BoxGeometry(0.16, 0.16, 0.16),
+            new THREE.MeshBasicMaterial({ color: sparkColors[i % sparkColors.length], transparent: true, opacity: 1 })
+        );
+        spark.position.set(worldX, worldY + 1.25, worldZ);
+        arenaScene.add(spark);
+        sparks.push({
+            mesh: spark,
+            vx: Math.cos(ang) * 3.4,
+            vy: 2.1 + Math.random() * 1.4,
+            vz: Math.sin(ang) * 3.4
+        });
+    }
+
+    punchEffects.push({
+        age: 0,
+        maxAge: 0.85,
+        sprite,
+        ring,
+        sparks
+    });
+}
+
+function spawnAirWhooshVisual(rigGroup) {
+    if (!arenaScene || !rigGroup) return;
+    const rotY = rigGroup.rotation.y || 0;
+    const fx = rigGroup.position.x + Math.sin(rotY) * 0.95;
+    const fz = rigGroup.position.z + Math.cos(rotY) * 0.95;
+
+    const arc = new THREE.Mesh(
+        new THREE.TorusGeometry(0.45, 0.055, 8, 20, Math.PI * 0.9),
+        new THREE.MeshBasicMaterial({ color: 0x7dd3fc, transparent: true, opacity: 0.85 })
+    );
+    arc.position.set(fx, rigGroup.position.y + 1.15, fz);
+    arc.rotation.y = rotY;
+    arenaScene.add(arc);
+
+    punchEffects.push({
+        age: 0,
+        maxAge: 0.24,
+        ring: arc,
+        sparks: []
+    });
+}
+
+function handleNetworkPunchEvent(evt) {
+    if (!evt || arenaPhase !== 'base_ops' || !arenaScene) return;
+    const arenaEl = document.getElementById('arena-container');
+    if (!arenaEl || arenaEl.classList.contains('hidden')) return;
+
+    playPlayfulPunchSound(true);
+
+    // Animar brazo del atacante remoto si no soy yo
+    if (evt.attackerId !== MP.myId && remoteBaseAstros[evt.attackerId]) {
+        remoteBaseAstros[evt.attackerId].punchTimer = 0.28;
+    }
+
+    // Coordenadas de impacto
+    let hitX = 0;
+    let hitY = 0;
+    let hitZ = 0;
+
+    if (evt.targetId === MP.myId && baseAstroRig && baseAstroRig.group) {
+        hitX = baseAstroRig.group.position.x;
+        hitY = baseAstroRig.group.position.y;
+        hitZ = baseAstroRig.group.position.z;
+
+        // Aplicar empujón amistoso + saltito cómico sin interrumpir minijuegos
+        selfKnockbackX = (evt.kx || 0) * 0.34;
+        selfKnockbackZ = (evt.kz || 0) * 0.34;
+        selfStunTimer = 0.42;
+        if (baseAstroGrounded) {
+            baseAstroVelY = 0.13;
+            baseAstroGrounded = false;
+        }
+
+        const now = performance.now();
+        if (now - lastPunchToastAt > 3000 && typeof MP.showNetworkToast === 'function') {
+            lastPunchToastAt = now;
+            MP.showNetworkToast(`🥊 ¡${evt.attackerName} te dio un empujón amistoso!`, false);
+        }
+    } else if (remoteBaseAstros[evt.targetId]) {
+        const targetRig = remoteBaseAstros[evt.targetId].rig;
+        remoteBaseAstros[evt.targetId].stunTimer = 0.45;
+        hitX = targetRig.group.position.x;
+        hitY = targetRig.group.position.y;
+        hitZ = targetRig.group.position.z;
+    } else if (MP.players[evt.targetId]) {
+        hitX = MP.players[evt.targetId].x || 0;
+        hitY = MP.players[evt.targetId].y || 0;
+        hitZ = MP.players[evt.targetId].z || 0;
+    }
+
+    spawnPunchImpactVisuals(hitX, hitY, hitZ);
+}
+
+function triggerPlayerPunch() {
+    if (arenaPhase !== 'base_ops' || isTaskModalOpen || isAnyGameModalOpen()) return;
+    if (!baseAstroRig || !baseAstroRig.group || punchCooldown > 0) return;
+
+    punchCooldown = 0.55;
+    selfPunchAnimTimer = 0.28;
+    spawnAirWhooshVisual(baseAstroRig.group);
+
+    const myPos = baseAstroRig.group.position;
+    const facingX = Math.sin(baseAstroRig.group.rotation.y);
+    const facingZ = Math.cos(baseAstroRig.group.rotation.y);
+
+    let bestTarget = null;
+    let bestDist = 2.45;
+
+    Object.values(MP.players).forEach(p => {
+        if (!p || p.id === MP.myId) return;
+        const tx = remoteBaseAstros[p.id] ? remoteBaseAstros[p.id].rig.group.position.x : (p.x || 0);
+        const tz = remoteBaseAstros[p.id] ? remoteBaseAstros[p.id].rig.group.position.z : (p.z || 0);
+
+        const dx = tx - myPos.x;
+        const dz = tz - myPos.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist > bestDist) return;
+
+        // Cono frontal generoso para golpear cómodo en tercera persona
+        const dirX = dist > 0.001 ? dx / dist : facingX;
+        const dirZ = dist > 0.001 ? dz / dist : facingZ;
+        const dot = dirX * facingX + dirZ * facingZ;
+
+        if (dot >= 0.05 || dist < 1.15) {
+            bestDist = dist;
+            bestTarget = { id: p.id, kx: dirX, kz: dirZ };
+        }
+    });
+
+    if (bestTarget) {
+        MP.sendPunch(bestTarget.id, bestTarget.kx, bestTarget.kz);
+    } else {
+        playPlayfulPunchSound(false);
+    }
+}
+
 function startPhoraArena() {
     const container = document.getElementById('arena-container');
     container.classList.remove('hidden');
@@ -52,6 +295,14 @@ function startPhoraArena() {
     isTaskModalOpen = false;
     activeTerminal = null;
     botTaskTimer = 0;
+
+    punchCooldown = 0;
+    selfPunchAnimTimer = 0;
+    selfStunTimer = 0;
+    selfKnockbackX = 0;
+    selfKnockbackZ = 0;
+    punchEffects = [];
+    MP.onPunchCallback = handleNetworkPunchEvent;
 
     activeMissionTasks = getMissionTasksForRole(
         GAME_STATE.selectedMission.id,
@@ -95,6 +346,9 @@ function setupArenaEvents() {
                 baseAstroVelY = 0.22;
                 baseAstroGrounded = false;
             }
+            if (e.code === 'KeyF') {
+                triggerPlayerPunch();
+            }
             if (e.code === 'KeyE' && activeTerminal && !completedTaskIds.has(activeTerminal.id)) {
                 const lockInfo = getTaskLockInfo(GAME_STATE.selectedRole.id, activeTerminal.taskIndex);
                 if (!lockInfo.locked) {
@@ -110,8 +364,12 @@ function setupArenaEvents() {
 
     webglHolder.onmousedown = e => {
         if (e.button === 2) return;
-        if (!isAnyGameModalOpen() && arenaPhase === 'base_ops') {
-            lockGamePointer();
+        if (!isAnyGameModalOpen() && arenaPhase === 'base_ops' && !isTaskModalOpen) {
+            if (document.pointerLockElement) {
+                triggerPlayerPunch();
+            } else {
+                lockGamePointer();
+            }
         }
     };
 
@@ -135,7 +393,8 @@ function setupArenaEvents() {
         const arenaCont = document.getElementById('arena-container');
         if (arenaCont) arenaCont.classList.add('hidden');
         if (typeof MP !== 'undefined') {
-            if (typeof MP.leaveRoom === 'function') MP.leaveRoom();
+            if (typeof MP.leaveCurrentRoom === 'function') MP.leaveCurrentRoom();
+            else if (typeof MP.leaveRoom === 'function') MP.leaveRoom();
             else if (typeof MP.disconnect === 'function') MP.disconnect();
         }
         returnToControlCenter();
@@ -446,6 +705,12 @@ function initPlanetaryBasePhase() {
     roleTerminals = [];
     remoteBaseAstros = {};
     flickeringLights = [];
+    punchEffects = [];
+    punchCooldown = 0;
+    selfPunchAnimTimer = 0;
+    selfStunTimer = 0;
+    selfKnockbackX = 0;
+    selfKnockbackZ = 0;
     baseCamYaw = 0;
     baseCamPitch = 0.32;
 
@@ -1052,11 +1317,11 @@ function updateBaseCompassHint() {
     const unlockedTask = pending.find(t => !getTaskLockInfo(myRoleId, t.taskIndex).locked);
 
     if (unlockedTask) {
-        hintEl.innerHTML = `🎯 Pendientes (${pending.length}/5): <b>${unlockedTask.title}</b> en <b>${unlockedTask.roomName}</b> • <b>[E]</b> Operar`;
+        hintEl.innerHTML = `🎯 Pendientes (${pending.length}/5): <b>${unlockedTask.title}</b> en <b>${unlockedTask.roomName}</b> • <b>[E]</b> Operar • <b>[Clic / F]</b> Empujar`;
     } else {
         const blocked = pending[0];
         const lockInfo = getTaskLockInfo(myRoleId, blocked.taskIndex);
-        hintEl.innerHTML = `🔒 <b>${blocked.title}</b> espera a que <b>${lockInfo.partnerRoleName}</b> complete su Tarea ${lockInfo.partnerTaskIndex}`;
+        hintEl.innerHTML = `🔒 <b>${blocked.title}</b> espera a que <b>${lockInfo.partnerRoleName}</b> complete su Tarea ${lockInfo.partnerTaskIndex} • <b>[Clic / F]</b> Empujar`;
     }
 }
 
@@ -1105,6 +1370,42 @@ function clampBaseCameraInsideWalls(camPos, targetPos) {
     }
 }
 
+function updatePunchEffects(dt) {
+    for (let i = punchEffects.length - 1; i >= 0; i--) {
+        const fx = punchEffects[i];
+        fx.age += dt;
+        const progress = Math.min(1, fx.age / fx.maxAge);
+
+        if (fx.sprite) {
+            fx.sprite.position.y += dt * 1.45;
+            fx.sprite.material.opacity = 1 - progress;
+        }
+        if (fx.ring) {
+            const s = 1 + progress * 3.2;
+            fx.ring.scale.set(s, s, s);
+            fx.ring.material.opacity = (1 - progress) * 0.85;
+        }
+        if (fx.sparks) {
+            fx.sparks.forEach(sp => {
+                sp.mesh.position.x += sp.vx * dt;
+                sp.mesh.position.y += sp.vy * dt;
+                sp.mesh.position.z += sp.vz * dt;
+                sp.vy -= 7.5 * dt;
+                sp.mesh.rotation.x += 8 * dt;
+                sp.mesh.rotation.y += 8 * dt;
+                sp.mesh.material.opacity = 1 - progress;
+            });
+        }
+
+        if (fx.age >= fx.maxAge) {
+            if (fx.sprite) arenaScene.remove(fx.sprite);
+            if (fx.ring) arenaScene.remove(fx.ring);
+            if (fx.sparks) fx.sparks.forEach(sp => arenaScene.remove(sp.mesh));
+            punchEffects.splice(i, 1);
+        }
+    }
+}
+
 function syncBaseRemoteAstronauts(elapsed, dt) {
     MP.updateBots(dt, 62 * BASE_MAP_SCALE);
 
@@ -1145,10 +1446,11 @@ function syncBaseRemoteAstronauts(elapsed, dt) {
             });
             rig.group.position.set(p.x || 0, p.y || 0, p.z || 0);
             arenaScene.add(rig.group);
-            remoteBaseAstros[p.id] = { rig, charId, name: p.name };
+            remoteBaseAstros[p.id] = { rig, charId, name: p.name, punchTimer: 0, stunTimer: 0 };
         }
 
-        const rig = remoteBaseAstros[p.id].rig;
+        const entry = remoteBaseAstros[p.id];
+        const rig = entry.rig;
         rig.group.position.x += ((p.x || 0) - rig.group.position.x) * smoothFactor;
         rig.group.position.y += ((p.y || 0) - rig.group.position.y) * smoothFactor;
         rig.group.position.z += ((p.z || 0) - rig.group.position.z) * smoothFactor;
@@ -1159,17 +1461,30 @@ function syncBaseRemoteAstronauts(elapsed, dt) {
 
         if (rig.propellerMesh) rig.propellerMesh.rotation.y += 0.25;
 
-        if (p.moving) {
-            const swing = Math.sin(elapsed * 10) * 0.48;
-            rig.leftLeg.rotation.x = swing;
-            rig.rightLeg.rotation.x = -swing;
-            rig.leftArm.rotation.x = -swing;
-            rig.rightArm.rotation.x = swing;
+        if (entry.stunTimer > 0) {
+            entry.stunTimer = Math.max(0, entry.stunTimer - dt);
+            rig.group.rotation.z = Math.sin(entry.stunTimer * 28) * 0.28;
+            rig.leftArm.rotation.x = -0.85;
+            rig.rightArm.rotation.x = -0.85;
         } else {
-            rig.leftLeg.rotation.x = 0;
-            rig.rightLeg.rotation.x = 0;
-            rig.leftArm.rotation.x = 0;
-            rig.rightArm.rotation.x = 0;
+            rig.group.rotation.z = 0;
+            if (p.moving) {
+                const swing = Math.sin(elapsed * 10) * 0.48;
+                rig.leftLeg.rotation.x = swing;
+                rig.rightLeg.rotation.x = -swing;
+                rig.leftArm.rotation.x = -swing;
+                rig.rightArm.rotation.x = swing;
+            } else {
+                rig.leftLeg.rotation.x = 0;
+                rig.rightLeg.rotation.x = 0;
+                rig.leftArm.rotation.x = 0;
+                rig.rightArm.rotation.x = 0;
+            }
+        }
+
+        if (entry.punchTimer > 0) {
+            entry.punchTimer = Math.max(0, entry.punchTimer - dt);
+            rig.rightArm.rotation.x = -Math.PI * 0.65;
         }
     });
 
@@ -1189,6 +1504,10 @@ function animatePlanetaryBase(now) {
     const elapsed = tNow * 0.001;
 
     MP.tickNetworkHealth();
+
+    if (punchCooldown > 0) punchCooldown = Math.max(0, punchCooldown - dt);
+    if (selfPunchAnimTimer > 0) selfPunchAnimTimer = Math.max(0, selfPunchAnimTimer - dt);
+    if (selfStunTimer > 0) selfStunTimer = Math.max(0, selfStunTimer - dt);
 
     flickeringLights.forEach(fl => {
         const wave = Math.sin(elapsed * 19 + fl.seed) * Math.cos(elapsed * 7 + fl.seed);
@@ -1245,6 +1564,16 @@ function animatePlanetaryBase(now) {
             }
         }
 
+        // Aplicar impulso de empujón/golpe amistoso recibido
+        if (Math.abs(selfKnockbackX) > 0.001 || Math.abs(selfKnockbackZ) > 0.001) {
+            baseAstroRig.group.position.x += selfKnockbackX;
+            baseAstroRig.group.position.z += selfKnockbackZ;
+            const kbDamp = Math.exp(-11 * dt);
+            selfKnockbackX *= kbDamp;
+            selfKnockbackZ *= kbDamp;
+            moving = true;
+        }
+
         resolveBaseWallCollisions(baseAstroRig.group.position);
 
         if (!baseAstroGrounded) {
@@ -1259,20 +1588,32 @@ function animatePlanetaryBase(now) {
 
         if (baseAstroRig.propellerMesh) baseAstroRig.propellerMesh.rotation.y += 0.25;
 
-        if (!baseAstroGrounded) {
-            baseAstroRig.leftArm.rotation.x = -0.6;
-            baseAstroRig.rightArm.rotation.x = -0.6;
-        } else if (moving) {
-            const swing = Math.sin(elapsed * 10) * 0.48;
-            baseAstroRig.leftLeg.rotation.x = swing;
-            baseAstroRig.rightLeg.rotation.x = -swing;
-            baseAstroRig.leftArm.rotation.x = -swing;
-            baseAstroRig.rightArm.rotation.x = swing;
+        if (selfStunTimer > 0) {
+            baseAstroRig.group.rotation.z = Math.sin(selfStunTimer * 28) * 0.26;
+            baseAstroRig.leftArm.rotation.x = -0.85;
+            baseAstroRig.rightArm.rotation.x = -0.85;
         } else {
-            baseAstroRig.leftLeg.rotation.x = 0;
-            baseAstroRig.rightLeg.rotation.x = 0;
-            baseAstroRig.leftArm.rotation.x = 0;
-            baseAstroRig.rightArm.rotation.x = 0;
+            baseAstroRig.group.rotation.z = 0;
+            if (!baseAstroGrounded) {
+                baseAstroRig.leftArm.rotation.x = -0.6;
+                baseAstroRig.rightArm.rotation.x = -0.6;
+            } else if (moving) {
+                const swing = Math.sin(elapsed * 10) * 0.48;
+                baseAstroRig.leftLeg.rotation.x = swing;
+                baseAstroRig.rightLeg.rotation.x = -swing;
+                baseAstroRig.leftArm.rotation.x = -swing;
+                baseAstroRig.rightArm.rotation.x = swing;
+            } else {
+                baseAstroRig.leftLeg.rotation.x = 0;
+                baseAstroRig.rightLeg.rotation.x = 0;
+                baseAstroRig.leftArm.rotation.x = 0;
+                baseAstroRig.rightArm.rotation.x = 0;
+            }
+        }
+
+        // Animación del brazo derecho al dar el golpe amistoso
+        if (selfPunchAnimTimer > 0) {
+            baseAstroRig.rightArm.rotation.x = -Math.PI * 0.68;
         }
 
         MP.sendMyPosition(
@@ -1327,12 +1668,13 @@ function animatePlanetaryBase(now) {
     }
 
     syncBaseRemoteAstronauts(elapsed, dt);
+    updatePunchEffects(dt);
     drawSectorRadarMinimap();
     arenaRenderer.render(arenaScene, arenaCamera);
 }
 
 // =========================================================================
-// MINIJUEGOS DE INGENIERÍA ESPACIAL + PREGUNTA CIENTÍFICA NASA (10 VARIANTES)
+// MINIJUEGOS DE INGENIERÍA ESPACIAL + PREGUNTA CIENTÍFICA NASA (12 VARIANTES)
 // =========================================================================
 function closeTaskModal() {
     isTaskModalOpen = false;
@@ -1644,7 +1986,7 @@ function renderRivetsMinigame(body, onSuccess) {
     });
 }
 
-// 7. Sincronizador de Órbita / Rotor (NUEVO)
+// 7. Sincronizador de Órbita / Rotor
 function renderOrbitSyncMinigame(body, onSuccess) {
     let angle = 0;
     let locked = 0;
@@ -1679,7 +2021,7 @@ function renderOrbitSyncMinigame(body, onSuccess) {
     };
 }
 
-// 8. Balanceador de Energía Solar / Nuclear (NUEVO)
+// 8. Balanceador de Energía Solar / Nuclear
 function renderPowerBalanceMinigame(body, onSuccess) {
     let total = 0;
     const target = 100;
@@ -1714,7 +2056,7 @@ function renderPowerBalanceMinigame(body, onSuccess) {
     };
 }
 
-// 9. Alineador de Antena de Espacio Profundo (NUEVO)
+// 9. Alineador de Antena de Espacio Profundo
 function renderDishAlignMinigame(body, onSuccess) {
     let az = 20;
     let el = 75;
@@ -1741,7 +2083,7 @@ function renderDishAlignMinigame(body, onSuccess) {
     };
 }
 
-// 10. Decodificador Binario de Telemetría (NUEVO)
+// 10. Decodificador Binario de Telemetría
 function renderBinaryDecodeMinigame(body, onSuccess) {
     const bits = [0, 0, 0, 0];
     const target = [1, 0, 1, 1];
@@ -1764,7 +2106,7 @@ function renderBinaryDecodeMinigame(body, onSuccess) {
     });
 }
 
-// 11. Mezcla Química ISRU (Oxígeno / Propelente) (NUEVO)
+// 11. Mezcla Química ISRU (Oxígeno / Propelente)
 function renderFuelMixMinigame(body, onSuccess) {
     let o2 = 30;
     body.innerHTML = `
@@ -1781,7 +2123,7 @@ function renderFuelMixMinigame(body, onSuccess) {
     };
 }
 
-// 12. Carga de Escudo Electrodinámico (NUEVO)
+// 12. Carga de Escudo Electrodinámico
 function renderShieldsChargeMinigame(body, onSuccess) {
     let charge = 0;
     body.innerHTML = `
