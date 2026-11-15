@@ -34,7 +34,9 @@ const MP = {
     hostConn: null,
     guestConns: [],
     players: {},
+    takenRolesByOthers: {}, // { roleId: playerName }
     lastSendTime: 0,
+    lastPeekedCode: '',
 
     initLobbyUI() {
         const initChar = GAME_DATA.characters.find(c => c.id === GAME_STATE.selectedCharacterId) || GAME_DATA.characters[0];
@@ -82,6 +84,8 @@ const MP = {
 
         document.getElementById('tab-create-btn').onclick = () => {
             this.isHost = true;
+            this.takenRolesByOthers = {};
+            this.lastPeekedCode = '';
             document.getElementById('tab-create-btn').classList.add('active');
             document.getElementById('tab-join-btn').classList.remove('active');
             document.getElementById('panel-create-room').classList.remove('hidden');
@@ -89,17 +93,21 @@ const MP = {
             this.players = {};
             this.syncLocalPlayerEntry();
             this.rebuildBotSlots();
+            this.renderLobbyRoles();
             this.renderPlayersList();
             this.setupHostPeer();
         };
 
         document.getElementById('tab-join-btn').onclick = () => {
             this.isHost = false;
+            this.takenRolesByOthers = {};
+            this.lastPeekedCode = '';
             document.getElementById('tab-join-btn').classList.add('active');
             document.getElementById('tab-create-btn').classList.remove('active');
             document.getElementById('panel-join-room').classList.remove('hidden');
             document.getElementById('panel-create-room').classList.add('hidden');
             document.getElementById('join-feedback').innerText = '';
+            this.renderLobbyRoles();
             setTimeout(() => document.getElementById('join-code-input').focus(), 50);
         };
 
@@ -111,8 +119,21 @@ const MP = {
             }
         };
 
+        const joinInput = document.getElementById('join-code-input');
+        joinInput.oninput = () => {
+            const clean = joinInput.value.replace(/\D/g, '').trim();
+            if (clean.length === 4 && clean !== this.lastPeekedCode) {
+                this.lastPeekedCode = clean;
+                this.peekRemoteRoomRoles(clean);
+            } else if (clean.length < 4) {
+                this.lastPeekedCode = '';
+                this.takenRolesByOthers = {};
+                this.renderLobbyRoles();
+            }
+        };
+
         const triggerJoin = () => {
-            const rawCode = document.getElementById('join-code-input').value.replace(/\D/g, '').trim();
+            const rawCode = joinInput.value.replace(/\D/g, '').trim();
             if (rawCode.length !== 4) {
                 document.getElementById('join-feedback').style.color = '#fbbf24';
                 document.getElementById('join-feedback').innerText = '⚠️ Escribe el código de 4 números de la sala.';
@@ -122,7 +143,7 @@ const MP = {
         };
 
         document.getElementById('connect-room-btn').onclick = triggerJoin;
-        document.getElementById('join-code-input').onkeydown = e => {
+        joinInput.onkeydown = e => {
             if (e.key === 'Enter') {
                 e.preventDefault();
                 triggerJoin();
@@ -130,8 +151,21 @@ const MP = {
         };
 
         document.getElementById('room-info-pill').onclick = () => {
+            this.refreshTakenRolesFromPlayers();
+            this.renderLobbyRoles();
+            this.renderPlayersList();
             document.getElementById('lobby-modal').classList.remove('hidden');
         };
+    },
+
+    refreshTakenRolesFromPlayers() {
+        const map = {};
+        Object.values(this.players).forEach(p => {
+            if (p.id !== this.myId && !p.isBot && p.roleId) {
+                map[p.roleId] = p.name;
+            }
+        });
+        this.takenRolesByOthers = map;
     },
 
     renderLobbyCharacters() {
@@ -171,19 +205,40 @@ const MP = {
 
     renderLobbyRoles() {
         const grid = document.getElementById('lobby-role-grid');
-        grid.innerHTML = GAME_DATA.roles.map(r => `
-            <div class="role-mini-item ${GAME_STATE.selectedRole.id === r.id ? 'selected' : ''}" data-role="${r.id}">
-                <span class="color-swatch" style="background:${r.colorCss};"></span>
-                <div>
-                    <strong style="font-size:0.84rem; display:block;">${r.name}</strong>
-                    <span style="font-size:0.72rem; color:#94a3b8;">${r.bonus}</span>
+        if (!grid) return;
+
+        // Si el rol actual quedó ocupado por otro jugador, cambiar automáticamente a uno libre
+        if (this.takenRolesByOthers[GAME_STATE.selectedRole.id]) {
+            const firstFree = GAME_DATA.roles.find(r => !this.takenRolesByOthers[r.id]);
+            if (firstFree) {
+                GAME_STATE.selectedRole = firstFree;
+                if (typeof updateTopMissionBadge === 'function') updateTopMissionBadge();
+            }
+        }
+
+        grid.innerHTML = GAME_DATA.roles.map(r => {
+            const takenBy = this.takenRolesByOthers[r.id];
+            const isSelected = !takenBy && GAME_STATE.selectedRole.id === r.id;
+            return `
+                <div class="role-mini-item ${isSelected ? 'selected' : ''} ${takenBy ? 'taken' : ''}" data-role="${r.id}">
+                    <div style="display:flex; align-items:center; gap:10px;">
+                        <span class="color-swatch" style="background:${r.colorCss};"></span>
+                        <div>
+                            <strong style="font-size:0.84rem; display:block;">${r.name}</strong>
+                            <span style="font-size:0.71rem; color:#94a3b8;">${r.bonus}</span>
+                        </div>
+                    </div>
+                    ${takenBy ? `<span class="role-taken-pill">🔒 ${takenBy}</span>` : ''}
                 </div>
-            </div>
-        `).join('');
+            `;
+        }).join('');
 
         grid.querySelectorAll('.role-mini-item').forEach(el => {
             el.onclick = () => {
-                const role = GAME_DATA.roles.find(r => r.id === el.dataset.role);
+                const roleId = el.dataset.role;
+                if (this.takenRolesByOthers[roleId]) return; // Bloqueado porque ya lo tomó otro jugador
+
+                const role = GAME_DATA.roles.find(r => r.id === roleId);
                 GAME_STATE.selectedRole = role;
                 this.renderLobbyRoles();
                 this.syncLocalPlayerEntry();
@@ -260,6 +315,7 @@ const MP = {
 
     renderPlayersList() {
         const list = document.getElementById('lobby-players-list');
+        if (!list) return;
         const all = Object.values(this.players);
         list.innerHTML = all.map(p => {
             const role = GAME_DATA.roles.find(r => r.id === p.roleId) || GAME_DATA.roles[0];
@@ -301,7 +357,9 @@ const MP = {
                     this.guestConns = this.guestConns.filter(c => c !== conn);
                     if (conn.peerPlayerId && this.players[conn.peerPlayerId]) {
                         delete this.players[conn.peerPlayerId];
+                        this.refreshTakenRolesFromPlayers();
                         this.rebuildBotSlots();
+                        this.renderLobbyRoles();
                         this.renderPlayersList();
                         this.broadcastRoomState();
                     }
@@ -325,7 +383,24 @@ const MP = {
     handleHostData(conn, data) {
         if (!data || !data.type) return;
 
-        if (data.type === 'JOIN') {
+        if (data.type === 'PEEK_ROOM') {
+            const takenRoles = {};
+            Object.values(this.players).forEach(p => {
+                if (!p.isBot && p.id !== data.requesterId && p.roleId) {
+                    takenRoles[p.roleId] = p.name;
+                }
+            });
+            const humanCount = Object.values(this.players).filter(p => !p.isBot).length;
+            if (conn.open) {
+                conn.send({
+                    type: 'PEEK_RESULT',
+                    takenRoles,
+                    maxPlayers: this.maxPlayers,
+                    currentHumans: humanCount
+                });
+            }
+
+        } else if (data.type === 'JOIN') {
             const incomingId = data.player.id;
 
             if (conn.peerPlayerId && conn.peerPlayerId !== incomingId) {
@@ -338,10 +413,20 @@ const MP = {
                 return;
             }
 
-            conn.peerPlayerId = incomingId;
-            this.players[incomingId] = { ...data.player, isBot: false };
+            // Garantizar que el rol del invitado sea único y no esté ocupado por otro humano
+            const usedHumanRoles = new Set(existingHumans.map(p => p.roleId));
+            let finalRoleId = data.player.roleId;
+            if (usedHumanRoles.has(finalRoleId)) {
+                const availableRole = GAME_DATA.roles.find(r => !usedHumanRoles.has(r.id));
+                if (availableRole) finalRoleId = availableRole.id;
+            }
 
+            conn.peerPlayerId = incomingId;
+            this.players[incomingId] = { ...data.player, roleId: finalRoleId, isBot: false };
+
+            this.refreshTakenRolesFromPlayers();
             this.rebuildBotSlots();
+            this.renderLobbyRoles();
             this.renderPlayersList();
 
             const welcomePayload = {
@@ -356,11 +441,45 @@ const MP = {
         } else if (data.type === 'MOVE') {
             if (this.players[data.id]) {
                 Object.assign(this.players[data.id], data.pos);
+                this.refreshTakenRolesFromPlayers();
             }
             this.guestConns.forEach(c => {
                 if (c !== conn && c.open) c.send(data);
             });
         }
+    },
+
+    // Consulta en vivo los roles ocupados en la sala antes de entrar
+    peekRemoteRoomRoles(code) {
+        if (typeof Peer === 'undefined') return;
+        const feedback = document.getElementById('join-feedback');
+        feedback.style.color = '#38bdf8';
+        feedback.innerText = `🔍 Verificando roles disponibles en sala #${code}...`;
+
+        const tempPeer = new Peer(PEER_ICE_CONFIG);
+        const cleanup = () => { try { tempPeer.destroy(); } catch (_) {} };
+
+        tempPeer.on('open', () => {
+            const conn = tempPeer.connect('nasa-cubo-phora-' + code, { reliable: true, serialization: 'json' });
+            conn.on('open', () => {
+                conn.send({ type: 'PEEK_ROOM', requesterId: this.myId });
+            });
+            conn.on('data', data => {
+                if (data && data.type === 'PEEK_RESULT') {
+                    this.takenRolesByOthers = data.takenRoles || {};
+                    this.renderLobbyRoles();
+                    const freeCount = 4 - Object.keys(this.takenRolesByOthers).length;
+                    feedback.style.color = '#10b981';
+                    feedback.innerText = `✓ Sala #${code} encontrada (${data.currentHumans}/${data.maxPlayers} jugadores). ${freeCount} roles libres marcados a la izquierda.`;
+                    setTimeout(cleanup, 300);
+                }
+            });
+        });
+        tempPeer.on('error', () => {
+            feedback.style.color = '#fbbf24';
+            feedback.innerText = `⚠️ No se detectó la sala #${code} aún. Verifica el código con el anfitrión.`;
+            cleanup();
+        });
     },
 
     joinRemoteRoom(code) {
@@ -439,19 +558,41 @@ const MP = {
                     this.maxPlayers = data.maxPlayers;
                     const myLocal = this.players[this.myId];
                     this.players = data.players;
-                    if (myLocal && this.players[this.myId]) {
-                        Object.assign(this.players[this.myId], myLocal);
+
+                    // Si el anfitrión nos asignó un rol libre distinto, aplicarlo
+                    if (this.players[this.myId] && this.players[this.myId].roleId) {
+                        const assignedRole = GAME_DATA.roles.find(r => r.id === this.players[this.myId].roleId);
+                        if (assignedRole) {
+                            GAME_STATE.selectedRole = assignedRole;
+                            if (typeof updateTopMissionBadge === 'function') updateTopMissionBadge();
+                        }
                     }
+
+                    if (myLocal && this.players[this.myId]) {
+                        this.players[this.myId].x = myLocal.x;
+                        this.players[this.myId].y = myLocal.y;
+                        this.players[this.myId].z = myLocal.z;
+                    }
+
+                    this.refreshTakenRolesFromPlayers();
+                    this.renderLobbyRoles();
+
                     if (data.missionId) {
                         GAME_STATE.selectedMission = GAME_DATA.missions.find(m => m.id === data.missionId) || GAME_STATE.selectedMission;
                         if (typeof updateTopMissionBadge === 'function') updateTopMissionBadge();
                     }
+
+                    if (typeof rebuildControlCenterAstronaut === 'function' && astroRig) {
+                        rebuildControlCenterAstronaut(astroRig.group.position.clone());
+                    }
+
                     document.getElementById('lobby-modal').classList.add('hidden');
                     this.updateHudBadge();
 
                 } else if (data.type === 'MOVE') {
                     if (data.id !== this.myId && this.players[data.id]) {
                         Object.assign(this.players[data.id], data.pos);
+                        this.refreshTakenRolesFromPlayers();
                     }
 
                 } else if (data.type === 'LAUNCH') {
@@ -526,7 +667,7 @@ const MP = {
             if (!p.isBot) return;
             p.waitTimer -= dt;
             if (p.waitTimer <= 0) {
-                p.targetX = (Math.random() - 0.5) * boundsLimit * 1.6;
+                p.targetX = (Math.random() - 0.5) * boundsLimit * 1.4;
                 p.targetZ = (Math.random() - 0.5) * boundsLimit * 1.4;
                 p.waitTimer = 2.5 + Math.random() * 3.5;
             }
