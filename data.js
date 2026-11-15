@@ -1,5 +1,4 @@
 const GAME_DATA = {
-    // Personajes jugables: Los Backyardigans en 3D
     characters: [
         { id: 'pablo', name: 'Pablo', shortName: 'Pablo', species: 'Pingüino Azul', colorCss: '#3b82f6' },
         { id: 'uniqua', name: 'Yonicua (Uniqua)', shortName: 'Yonicua', species: 'Exploradora Rosa', colorCss: '#ec4899' },
@@ -13,7 +12,7 @@ const GAME_DATA = {
             orbitLabel: 'ÓRBITA ACTUAL: LA LUNA',
             difficulty: 'Fácil',
             rewardCredits: 450,
-            desc: 'Complejo subterráneo en cráteres lunares con reservas de hielo.',
+            desc: 'Complejo de 9 módulos en el polo sur lunar con reservas de hielo.',
             groundColor: 0x64748b,
             skyColor: 0x050814,
             accentColor: 0x38bdf8,
@@ -44,8 +43,11 @@ const GAME_DATA = {
             asteroidCount: 18
         }
     ],
-    // Taller por partes simples: Pico, Alas, Motor y Humo, Fuselaje y Pintura
-    // Incluye 2 piezas gratis (0 CR) en las partes principales para poder customizar desde el inicio
+    suitProtocols: [
+        { id: 'proto_balanced', name: 'Protocolo Estándar NASA', desc: 'Equilibrio entre movilidad y soporte vital', o2Bonus: 0, shieldBonus: 0 },
+        { id: 'proto_explorer', name: 'Exploración de Largo Alcance', desc: '+25s extra de oxígeno para recorrer las 9 salas', o2Bonus: 25, shieldBonus: 0 },
+        { id: 'proto_vanguard', name: 'Blindaje Reforzado EVA', desc: '+15% escudo extra en travesía espacial', o2Bonus: 0, shieldBonus: 15 }
+    ],
     shipCustomization: {
         noses: [
             { id: 'nose_standard', name: 'Pico Cónico Clásico', price: 0, desc: 'Punta estándar equilibrada', speedBonus: 0, shieldBonus: 0, o2Bonus: 0 },
@@ -88,6 +90,7 @@ const GAME_DATA = {
             { id: 'scol_purple', name: 'Franjas Púrpura', price: 500, hex: 0x9333ea, css: '#9333ea', desc: 'Acabado violeta' }
         ]
     },
+    // Cada rol tiene 3 misiones ÚNICAS repartidas en 3 SALAS DISTINTAS del complejo 68x68
     roles: [
         {
             id: 'commander',
@@ -95,11 +98,11 @@ const GAME_DATA = {
             short: 'Comandante',
             colorHex: 0x38bdf8,
             colorCss: '#38bdf8',
-            bonus: 'Control de Puente y Navegación',
+            bonus: 'Puente Norte, Armería Noroeste y Motores Sureste',
             tasks: [
-                { id: 'cmd_nav', title: 'Calibrar Ruta de Retorno', wallLabel: 'PUENTE: RUTA', type: 'sequence', x: -3.4, z: -14.8, rotY: 0 },
-                { id: 'cmd_shield', title: 'Alinear Escudos de Base', wallLabel: 'PUENTE: ESCUDOS', type: 'timing', x: 3.4, z: -14.8, rotY: 0 },
-                { id: 'cmd_thruster', title: 'Verificar Vector Orbital', wallLabel: 'NORTE: VECTOR', type: 'slider', x: 0, z: -14.8, rotY: 0 }
+                { id: 'cmd_nav', title: 'Trazar Vector de Retorno Orbital', roomName: 'Puente de Navegación (Norte)', wallLabel: 'PUENTE: VECTOR', type: 'sequence', x: 0, z: -32.8, rotY: 0 },
+                { id: 'cmd_shield', title: 'Calibrar Escudo Deflector Planetario', roomName: 'Armería / Defensa (Noroeste)', wallLabel: 'ARMERÍA: ESCUDO', type: 'timing', x: -32.8, z: -22, rotY: Math.PI / 2 },
+                { id: 'cmd_thruster', title: 'Verificar Presión de Propulsores', roomName: 'Bahía de Carga (Sureste)', wallLabel: 'MOTORES: EMPUJE', type: 'slider', x: 22, z: 32.8, rotY: Math.PI }
             ]
         },
         {
@@ -108,11 +111,11 @@ const GAME_DATA = {
             short: 'Ingeniero',
             colorHex: 0xf59e0b,
             colorCss: '#f59e0b',
-            bonus: 'Reactores, Energía y Casco',
+            bonus: 'Reactor Oeste, Sala Eléctrica Suroeste y Carga Sureste',
             tasks: [
-                { id: 'eng_wires', title: 'Conectar Bus del Reactor', wallLabel: 'REACTOR: CABLES', type: 'wires', x: -14.8, z: -3.4, rotY: Math.PI / 2 },
-                { id: 'eng_hull', title: 'Soldar Microfisuras de Casco', wallLabel: 'REACTOR: CASCO', type: 'rivets', x: -14.8, z: 3.4, rotY: Math.PI / 2 },
-                { id: 'eng_core', title: 'Estabilizar Núcleo Térmico', wallLabel: 'OESTE: NÚCLEO', type: 'timing', x: -14.8, z: 0, rotY: Math.PI / 2 }
+                { id: 'eng_core', title: 'Estabilizar Núcleo de Fusión', roomName: 'Sala del Reactor (Oeste)', wallLabel: 'REACTOR: NÚCLEO', type: 'timing', x: -32.8, z: 0, rotY: Math.PI / 2 },
+                { id: 'eng_wires', title: 'Reconectar Bus de Alta Tensión', roomName: 'Sala Eléctrica (Suroeste)', wallLabel: 'ELÉCTRICA: BUS', type: 'wires', x: -22, z: 32.8, rotY: Math.PI },
+                { id: 'eng_hull', title: 'Sellar Compuerta Presurizada', roomName: 'Bahía de Carga (Sureste)', wallLabel: 'CARGA: COMPUERTA', type: 'rivets', x: 32.8, z: 22, rotY: -Math.PI / 2 }
             ]
         },
         {
@@ -121,11 +124,11 @@ const GAME_DATA = {
             short: 'Científico',
             colorHex: 0x10b981,
             colorCss: '#10b981',
-            bonus: 'Laboratorio y Muestras',
+            bonus: 'Lab MedBay Este, Soporte Vital Noreste y Cafetería',
             tasks: [
-                { id: 'sci_cryo', title: 'Ajustar Cámara Criogénica', wallLabel: 'LAB: CRIOGENIA', type: 'temp', x: 14.8, z: -3.4, rotY: -Math.PI / 2 },
-                { id: 'sci_dna', title: 'Secuenciar Muestra Mineral', wallLabel: 'LAB: MUESTRAS', type: 'sequence', x: 14.8, z: 3.4, rotY: -Math.PI / 2 },
-                { id: 'sci_drill', title: 'Analizar Escáner MedBay', wallLabel: 'ESTE: ESCÁNER', type: 'timing', x: 14.8, z: 0, rotY: -Math.PI / 2 }
+                { id: 'sci_dna', title: 'Secuenciar Muestra Mineral Extraterrestre', roomName: 'Laboratorio MedBay (Este)', wallLabel: 'LAB: ISÓTOPOS', type: 'sequence', x: 32.8, z: 0, rotY: -Math.PI / 2 },
+                { id: 'sci_cryo', title: 'Regular Cámara Criogénica de Cultivos', roomName: 'Soporte Vital O2 (Noreste)', wallLabel: 'O2: CRIOGENIA', type: 'temp', x: 22, z: -32.8, rotY: 0 },
+                { id: 'sci_atmo', title: 'Analizar Espectrómetro Atmosférico', roomName: 'Cafetería Central (Sector NE)', wallLabel: 'CENTRAL: ATMÓSFERA', type: 'slider', x: 9.8, z: -6.5, rotY: -Math.PI / 2 }
             ]
         },
         {
@@ -134,11 +137,11 @@ const GAME_DATA = {
             short: 'Comunicaciones',
             colorHex: 0xa855f7,
             colorCss: '#a855f7',
-            bonus: 'Antenas, Datos y Telemetría',
+            bonus: 'Comunicaciones Sur, Puente Norte y Eléctrica Suroeste',
             tasks: [
-                { id: 'com_freq', title: 'Sintonizar Antena con Tierra', wallLabel: 'COMMS: ANTENA', type: 'slider', x: -3.4, z: 14.8, rotY: Math.PI },
-                { id: 'com_nodes', title: 'Enlazar Nodos Satelitales', wallLabel: 'COMMS: NODOS', type: 'wires', x: 3.4, z: 14.8, rotY: Math.PI },
-                { id: 'com_data', title: 'Codificar Paquete Científico', wallLabel: 'SUR: TELEMETRÍA', type: 'sequence', x: 0, z: 14.8, rotY: Math.PI }
+                { id: 'com_freq', title: 'Sintonizar Antena de Espacio Profundo', roomName: 'Comunicaciones (Sur)', wallLabel: 'COMMS: ANTENA', type: 'slider', x: 0, z: 32.8, rotY: Math.PI },
+                { id: 'com_nodes', title: 'Enlazar Nodos de Satélite Orbital', roomName: 'Puente de Navegación (Norte)', wallLabel: 'PUENTE: SATÉLITE', type: 'wires', x: 6.5, z: -32.8, rotY: 0 },
+                { id: 'com_data', title: 'Codificar Paquete de Datos a la Tierra', roomName: 'Sala Eléctrica (Suroeste)', wallLabel: 'ELÉCTRICA: DATOS', type: 'sequence', x: -32.8, z: 22, rotY: Math.PI / 2 }
             ]
         }
     ]
@@ -163,6 +166,7 @@ const GAME_STATE = {
     selectedMission: GAME_DATA.missions[0],
     selectedRole: GAME_DATA.roles[0],
     selectedCharacterId: 'pablo',
+    selectedSuitProtocol: GAME_DATA.suitProtocols[0],
     credits: 500,
     unlockedParts: [...DEFAULT_UNLOCKED_PARTS],
     shipConfig: {
@@ -218,16 +222,16 @@ const GAME_STATE = {
 
     getShipTotalStats() {
         const c = this.shipConfig;
+        const proto = this.selectedSuitProtocol || GAME_DATA.suitProtocols[0];
         const speedMult = c.booster.speedBonus + c.hull.speedBonus + c.nose.speedBonus + c.wing.speedBonus;
-        const shieldBonus = c.booster.shieldBonus + c.hull.shieldBonus + c.nose.shieldBonus + c.wing.shieldBonus;
-        const o2Bonus = c.booster.o2Bonus + c.hull.o2Bonus + c.nose.o2Bonus + c.wing.o2Bonus;
+        const shieldBonus = c.booster.shieldBonus + c.hull.shieldBonus + c.nose.shieldBonus + c.wing.shieldBonus + proto.shieldBonus;
+        const o2Bonus = c.booster.o2Bonus + c.hull.o2Bonus + c.nose.o2Bonus + c.wing.o2Bonus + proto.o2Bonus;
         return { speedMult, shieldBonus, o2Bonus };
     }
 };
 
 GAME_STATE.loadProgress();
 
-// Construye la nave 3D reflejando Pico, Alas, Motor+Humo, Fuselaje y Pintura
 function buildCustom3DRocket(includeFlame) {
     const rocket = new THREE.Group();
     const cfg = GAME_STATE.shipConfig;
@@ -238,7 +242,6 @@ function buildCustom3DRocket(includeFlame) {
     const glassMat = new THREE.MeshStandardMaterial({ color: 0x38bdf8, metalness: 0.85, roughness: 0.1 });
     const cyanGlowMat = new THREE.MeshStandardMaterial({ color: 0x38bdf8, emissive: 0x0284c7, emissiveIntensity: 0.7 });
 
-    // 1. Fuselaje
     let topRadius = 0.58;
     if (cfg.hull.id === 'hull_slim') {
         topRadius = 0.46;
@@ -270,7 +273,6 @@ function buildCustom3DRocket(includeFlame) {
     cockpitWindow.position.set(0, 0.68, topRadius - 0.05);
     rocket.add(cockpitWindow);
 
-    // 2. Pico / Morro frontal
     if (cfg.nose.id === 'nose_needle') {
         const needle = new THREE.Mesh(new THREE.ConeGeometry(topRadius, 1.85, 24), accentMat);
         needle.position.y = 2.35;
@@ -297,7 +299,6 @@ function buildCustom3DRocket(includeFlame) {
         rocket.add(nose);
     }
 
-    // 3. Alas
     if (cfg.wing.id === 'wing_aero') {
         [-1.22, 1.22].forEach(wx => {
             const wing = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.12, 0.95), accentMat);
@@ -330,7 +331,6 @@ function buildCustom3DRocket(includeFlame) {
         }
     }
 
-    // 4. Motores y Humo/Fuego de despegue
     const flames = [];
     const smokePuffs = [];
     const flameMat = new THREE.MeshBasicMaterial({ color: cfg.booster.flameHex });
@@ -367,7 +367,6 @@ function buildCustom3DRocket(includeFlame) {
             rocket.add(flame);
             flames.push(flame);
 
-            // Partículas de humo animado saliendo del motor
             for (let s = 0; s < 3; s++) {
                 const puff = new THREE.Mesh(new THREE.SphereGeometry(isMain ? 0.24 : 0.14, 10, 10), smokeMat);
                 puff.position.set(nx, ny - 1.2 - s * 0.45, nz);
@@ -378,7 +377,6 @@ function buildCustom3DRocket(includeFlame) {
         });
     }
 
-    // Tren de aterrizaje
     for (let i = 0; i < 4; i++) {
         const angle = (i * Math.PI) / 2 + Math.PI / 4;
         const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.08, 0.9, 8), darkMat);
