@@ -90,7 +90,7 @@ const GAME_DATA = {
             { id: 'scol_purple', name: 'Franjas Púrpura', price: 500, hex: 0x9333ea, css: '#9333ea', desc: 'Acabado violeta' }
         ]
     },
-    // Cada rol tiene 3 misiones ÚNICAS repartidas en 3 SALAS DISTINTAS del complejo 68x68
+    // Cada rol tiene 3 misiones ÚNICAS en 3 SALAS DISTINTAS con datos reales de la NASA
     roles: [
         {
             id: 'commander',
@@ -100,9 +100,48 @@ const GAME_DATA = {
             colorCss: '#38bdf8',
             bonus: 'Puente Norte, Armería Noroeste y Motores Sureste',
             tasks: [
-                { id: 'cmd_nav', title: 'Trazar Vector de Retorno Orbital', roomName: 'Puente de Navegación (Norte)', wallLabel: 'PUENTE: VECTOR', type: 'sequence', x: 0, z: -32.8, rotY: 0 },
-                { id: 'cmd_shield', title: 'Calibrar Escudo Deflector Planetario', roomName: 'Armería / Defensa (Noroeste)', wallLabel: 'ARMERÍA: ESCUDO', type: 'timing', x: -32.8, z: -22, rotY: Math.PI / 2 },
-                { id: 'cmd_thruster', title: 'Verificar Presión de Propulsores', roomName: 'Bahía de Carga (Sureste)', wallLabel: 'MOTORES: EMPUJE', type: 'slider', x: 22, z: 32.8, rotY: Math.PI }
+                {
+                    id: 'cmd_nav',
+                    title: 'Trazar Vector de Retorno Orbital',
+                    roomName: 'Puente de Navegación (Norte)',
+                    wallLabel: 'PUENTE: VECTOR',
+                    type: 'sequence',
+                    x: 0,
+                    z: -32.8,
+                    rotY: 0,
+                    nasaFact: 'La Red del Espacio Profundo (DSN) de la NASA usa antenas en EE.UU., España y Australia para guiar naves.',
+                    nasaQuestion: '¿Qué red de antenas usa la NASA para rastrear naves interplanetarias?',
+                    nasaOptions: ['Red del Espacio Profundo (DSN)', 'Radar de tráfico aéreo', 'Satélites de televisión'],
+                    correctIdx: 0
+                },
+                {
+                    id: 'cmd_shield',
+                    title: 'Calibrar Escudo Deflector Planetario',
+                    roomName: 'Armería / Defensa (Noroeste)',
+                    wallLabel: 'ARMERÍA: ESCUDO',
+                    type: 'timing',
+                    x: -32.8,
+                    z: -22,
+                    rotY: Math.PI / 2,
+                    nasaFact: 'La Estación Espacial Internacional usa escudos Whipple que desintegran micrometeoritos antes de perforar el casco.',
+                    nasaQuestion: '¿Para qué sirven los escudos Whipple en las naves de la NASA?',
+                    nasaOptions: ['Frenar impactos de micrometeoritos', 'Producir oxígeno líquido', 'Aumentar la gravedad'],
+                    correctIdx: 0
+                },
+                {
+                    id: 'cmd_thruster',
+                    title: 'Verificar Presión de Propulsores',
+                    roomName: 'Bahía de Carga (Sureste)',
+                    wallLabel: 'MOTORES: EMPUJE',
+                    type: 'slider',
+                    x: 22,
+                    z: 32.8,
+                    rotY: Math.PI,
+                    nasaFact: 'El cohete SLS del programa Artemis de la NASA genera 39 meganewtons de empuje para viajar a la Luna.',
+                    nasaQuestion: '¿Cómo se llama el programa de la NASA que lleva astronautas de vuelta a la Luna?',
+                    nasaOptions: ['Programa Artemis', 'Misión Cassini', 'Proyecto Hubble'],
+                    correctIdx: 0
+                }
             ]
         },
         {
@@ -113,9 +152,48 @@ const GAME_DATA = {
             colorCss: '#f59e0b',
             bonus: 'Reactor Oeste, Sala Eléctrica Suroeste y Carga Sureste',
             tasks: [
-                { id: 'eng_core', title: 'Estabilizar Núcleo de Fusión', roomName: 'Sala del Reactor (Oeste)', wallLabel: 'REACTOR: NÚCLEO', type: 'timing', x: -32.8, z: 0, rotY: Math.PI / 2 },
-                { id: 'eng_wires', title: 'Reconectar Bus de Alta Tensión', roomName: 'Sala Eléctrica (Suroeste)', wallLabel: 'ELÉCTRICA: BUS', type: 'wires', x: -22, z: 32.8, rotY: Math.PI },
-                { id: 'eng_hull', title: 'Sellar Compuerta Presurizada', roomName: 'Bahía de Carga (Sureste)', wallLabel: 'CARGA: COMPUERTA', type: 'rivets', x: 32.8, z: 22, rotY: -Math.PI / 2 }
+                {
+                    id: 'eng_core',
+                    title: 'Estabilizar Núcleo de Fusión',
+                    roomName: 'Sala del Reactor (Oeste)',
+                    wallLabel: 'REACTOR: NÚCLEO',
+                    type: 'timing',
+                    x: -32.8,
+                    z: 0,
+                    rotY: Math.PI / 2,
+                    nasaFact: 'El rover Perseverance usa un generador MMRTG que convierte el calor del plutonio-238 en electricidad continua.',
+                    nasaQuestion: '¿Cómo obtiene energía continua el rover Perseverance en Marte?',
+                    nasaOptions: ['Generador termoeléctrico MMRTG', 'Molinos de viento', 'Combustible diésel'],
+                    correctIdx: 0
+                },
+                {
+                    id: 'eng_wires',
+                    title: 'Reconectar Bus de Alta Tensión',
+                    roomName: 'Sala Eléctrica (Suroeste)',
+                    wallLabel: 'ELÉCTRICA: BUS',
+                    type: 'wires',
+                    x: -22,
+                    z: 32.8,
+                    rotY: Math.PI,
+                    nasaFact: 'Los paneles solares de la Estación Espacial Internacional generan hasta 120 kilovatios de electricidad.',
+                    nasaQuestion: '¿Cuál es la fuente principal de electricidad en la Estación Espacial Internacional?',
+                    nasaOptions: ['Paneles solares fotovoltaicos', 'Turbinas hidráulicas', 'Baterías desechables'],
+                    correctIdx: 0
+                },
+                {
+                    id: 'eng_hull',
+                    title: 'Sellar Compuerta Presurizada',
+                    roomName: 'Bahía de Carga (Sureste)',
+                    wallLabel: 'CARGA: COMPUERTA',
+                    type: 'rivets',
+                    x: 32.8,
+                    z: 22,
+                    rotY: -Math.PI / 2,
+                    nasaFact: 'En el vacío espacial la presión es cero; las esclusas herméticas evitan que se pierda el aire respirable.',
+                    nasaQuestion: '¿Por qué es vital sellar herméticamente las compuertas de una base espacial?',
+                    nasaOptions: ['Conservar la presión y el oxígeno', 'Evitar que entre lluvia', 'Reducir el peso del módulo'],
+                    correctIdx: 0
+                }
             ]
         },
         {
@@ -126,9 +204,48 @@ const GAME_DATA = {
             colorCss: '#10b981',
             bonus: 'Lab MedBay Este, Soporte Vital Noreste y Cafetería',
             tasks: [
-                { id: 'sci_dna', title: 'Secuenciar Muestra Mineral Extraterrestre', roomName: 'Laboratorio MedBay (Este)', wallLabel: 'LAB: ISÓTOPOS', type: 'sequence', x: 32.8, z: 0, rotY: -Math.PI / 2 },
-                { id: 'sci_cryo', title: 'Regular Cámara Criogénica de Cultivos', roomName: 'Soporte Vital O2 (Noreste)', wallLabel: 'O2: CRIOGENIA', type: 'temp', x: 22, z: -32.8, rotY: 0 },
-                { id: 'sci_atmo', title: 'Analizar Espectrómetro Atmosférico', roomName: 'Cafetería Central (Sector NE)', wallLabel: 'CENTRAL: ATMÓSFERA', type: 'slider', x: 9.8, z: -6.5, rotY: -Math.PI / 2 }
+                {
+                    id: 'sci_dna',
+                    title: 'Secuenciar Muestra Mineral Extraterrestre',
+                    roomName: 'Laboratorio MedBay (Este)',
+                    wallLabel: 'LAB: ISÓTOPOS',
+                    type: 'sequence',
+                    x: 32.8,
+                    z: 0,
+                    rotY: -Math.PI / 2,
+                    nasaFact: 'El cráter Jezero en Marte fue un antiguo lago hace 3.500 millones de años, clave para buscar vida microbiana.',
+                    nasaQuestion: '¿Por qué la NASA explora el cráter Jezero en Marte?',
+                    nasaOptions: ['Contuvo un antiguo lago de agua', 'Tiene bosques subterráneos', 'Es la zona más cálida'],
+                    correctIdx: 0
+                },
+                {
+                    id: 'sci_cryo',
+                    title: 'Regular Cámara Criogénica de Cultivos',
+                    roomName: 'Soporte Vital O2 (Noreste)',
+                    wallLabel: 'O2: CRIOGENIA',
+                    type: 'temp',
+                    x: 22,
+                    z: -32.8,
+                    rotY: 0,
+                    nasaFact: 'El cráter Shackleton en el polo sur de la Luna guarda hielo de agua en zonas que nunca reciben luz solar.',
+                    nasaQuestion: '¿Qué recurso estratégico encontró la NASA en el polo sur lunar?',
+                    nasaOptions: ['Hielo de agua', 'Gas natural', 'Rocas volcánicas calientes'],
+                    correctIdx: 0
+                },
+                {
+                    id: 'sci_atmo',
+                    title: 'Analizar Espectrómetro Atmosférico',
+                    roomName: 'Cafetería Central (Sector NE)',
+                    wallLabel: 'CENTRAL: ATMÓSFERA',
+                    type: 'slider',
+                    x: 9.8,
+                    z: -6.5,
+                    rotY: -Math.PI / 2,
+                    nasaFact: 'El instrumento MOXIE de la NASA produjo oxígeno respirable a partir del 95% de CO₂ de la atmósfera de Marte.',
+                    nasaQuestion: '¿De qué gas extrajo oxígeno el experimento MOXIE de la NASA en Marte?',
+                    nasaOptions: ['Dióxido de carbono (CO₂)', 'Helio atmosférico', 'Vapor de mercurio'],
+                    correctIdx: 0
+                }
             ]
         },
         {
@@ -139,9 +256,48 @@ const GAME_DATA = {
             colorCss: '#a855f7',
             bonus: 'Comunicaciones Sur, Puente Norte y Eléctrica Suroeste',
             tasks: [
-                { id: 'com_freq', title: 'Sintonizar Antena de Espacio Profundo', roomName: 'Comunicaciones (Sur)', wallLabel: 'COMMS: ANTENA', type: 'slider', x: 0, z: 32.8, rotY: Math.PI },
-                { id: 'com_nodes', title: 'Enlazar Nodos de Satélite Orbital', roomName: 'Puente de Navegación (Norte)', wallLabel: 'PUENTE: SATÉLITE', type: 'wires', x: 6.5, z: -32.8, rotY: 0 },
-                { id: 'com_data', title: 'Codificar Paquete de Datos a la Tierra', roomName: 'Sala Eléctrica (Suroeste)', wallLabel: 'ELÉCTRICA: DATOS', type: 'sequence', x: -32.8, z: 22, rotY: Math.PI / 2 }
+                {
+                    id: 'com_freq',
+                    title: 'Sintonizar Antena de Espacio Profundo',
+                    roomName: 'Comunicaciones (Sur)',
+                    wallLabel: 'COMMS: ANTENA',
+                    type: 'slider',
+                    x: 0,
+                    z: 32.8,
+                    rotY: Math.PI,
+                    nasaFact: 'Las ondas de radio viajan a la velocidad de la luz y tardan hasta 22 minutos en ir de Marte a la Tierra.',
+                    nasaQuestion: '¿Por qué las comunicaciones entre Marte y la Tierra tienen minutos de retraso?',
+                    nasaOptions: ['La gran distancia entre planetas', 'Falta de antenas en la Tierra', 'Interferencia de asteroides'],
+                    correctIdx: 0
+                },
+                {
+                    id: 'com_nodes',
+                    title: 'Enlazar Nodos de Satélite Orbital',
+                    roomName: 'Puente de Navegación (Norte)',
+                    wallLabel: 'PUENTE: SATÉLITE',
+                    type: 'wires',
+                    x: 6.5,
+                    z: -32.8,
+                    rotY: 0,
+                    nasaFact: 'La sonda Europa Clipper de la NASA estudia Europa, luna de Júpiter con un océano salado bajo su hielo.',
+                    nasaQuestion: '¿Qué oculta la luna Europa debajo de su corteza helada según la NASA?',
+                    nasaOptions: ['Un océano global de agua líquida', 'Un núcleo de madera', 'Cráteres de lava'],
+                    correctIdx: 0
+                },
+                {
+                    id: 'com_data',
+                    title: 'Codificar Paquete de Datos a la Tierra',
+                    roomName: 'Sala Eléctrica (Suroeste)',
+                    wallLabel: 'ELÉCTRICA: DATOS',
+                    type: 'sequence',
+                    x: -32.8,
+                    z: 22,
+                    rotY: Math.PI / 2,
+                    nasaFact: 'El sistema DSOC de la NASA probó láseres ópticos para transmitir datos desde el espacio profundo mucho más rápido.',
+                    nasaQuestion: '¿Qué tecnología usa el sistema DSOC de la NASA para acelerar envíos de datos?',
+                    nasaOptions: ['Láseres ópticos', 'Señales acústicas', 'Cables de cobre'],
+                    correctIdx: 0
+                }
             ]
         }
     ]
