@@ -1,5 +1,6 @@
 let ccScene, ccCamera, ccRenderer, ccAnimId;
-let astroRig, windowPlanet;
+var astroRig = null;
+let windowPlanet = null;
 let astroVelY = 0;
 let astroGrounded = true;
 let remoteCCAstros = {};
@@ -27,25 +28,25 @@ function initControlCenter() {
 
     ccScene = new THREE.Scene();
     ccScene.background = new THREE.Color(0x060b19);
-    ccScene.fog = new THREE.Fog(0x060b19, 24, 58);
+    ccScene.fog = new THREE.Fog(0x060b19, 28, 70);
 
-    ccCamera = new THREE.PerspectiveCamera(55, container.clientWidth / container.clientHeight, 0.1, 100);
-    ccCamera.position.set(0, 9.5, 13.5);
+    ccCamera = new THREE.PerspectiveCamera(55, container.clientWidth / container.clientHeight, 0.1, 120);
+    ccCamera.position.set(0, 8.5, 13.5);
 
     ccRenderer = new THREE.WebGLRenderer({ antialias: true });
     ccRenderer.setSize(container.clientWidth, container.clientHeight);
     ccRenderer.shadowMap.enabled = true;
     container.appendChild(ccRenderer.domElement);
 
-    ccScene.add(new THREE.AmbientLight(0x94a3b8, 0.95));
+    ccScene.add(new THREE.AmbientLight(0x94a3b8, 1.0));
 
     const mainLight = new THREE.DirectionalLight(0xe0f2fe, 1.15);
     mainLight.position.set(8, 18, 10);
     mainLight.castShadow = true;
     ccScene.add(mainLight);
 
-    const cyanGlow = new THREE.PointLight(0x38bdf8, 1.5, 30);
-    cyanGlow.position.set(0, 6, -4);
+    const cyanGlow = new THREE.PointLight(0x38bdf8, 1.5, 32);
+    cyanGlow.position.set(0, 6.5, -4);
     ccScene.add(cyanGlow);
 
     buildControlRoom();
@@ -54,6 +55,7 @@ function initControlCenter() {
     buildStations();
     setupControlCenterEvents(container);
     updateCreditsHUD();
+    updateTopMissionBadge();
 
     ccLastTime = performance.now();
     animateControlCenter();
@@ -64,7 +66,15 @@ function updateCreditsHUD() {
     if (el) el.innerText = `${GAME_STATE.credits} CR`;
 }
 
+function updateTopMissionBadge() {
+    const badge = document.getElementById('active-mission-badge');
+    if (badge) {
+        badge.innerHTML = `Destino: <strong>${GAME_STATE.selectedMission.name}</strong> | Rol: <strong>${GAME_STATE.selectedRole.short}</strong>`;
+    }
+}
+
 function rebuildControlCenterAstronaut(pos) {
+    if (!ccScene) return;
     if (astroRig && astroRig.group) {
         ccScene.remove(astroRig.group);
     }
@@ -89,7 +99,7 @@ function syncAllRemoteAstronauts(time, dt) {
         activeIds.add(p.id);
 
         const charId = p.characterId || 'pablo';
-        if (!remoteCCAstros[p.id] || remoteCCAstros[p.id].charId !== charId || remoteCCAstros[p.id].name !== p.name) {
+        if (!remoteCCAstros[p.id] || remoteCCAstros[p.id].charId !== charId || remoteCCAstros[p.id].name !== p.name || remoteCCAstros[p.id].roleId !== p.roleId) {
             if (remoteCCAstros[p.id]) {
                 ccScene.remove(remoteCCAstros[p.id].rig.group);
             }
@@ -103,7 +113,7 @@ function syncAllRemoteAstronauts(time, dt) {
             });
             rig.group.position.set(p.x || 0, p.y || 0, p.z || 3);
             ccScene.add(rig.group);
-            remoteCCAstros[p.id] = { rig, charId, name: p.name };
+            remoteCCAstros[p.id] = { rig, charId, name: p.name, roleId: p.roleId };
         }
 
         const rig = remoteCCAstros[p.id].rig;
@@ -148,6 +158,10 @@ function buildControlRoom() {
     floor.receiveShadow = true;
     ccScene.add(floor);
 
+    const grid = new THREE.GridHelper(24, 24, 0x38bdf8, 0x1e293b);
+    grid.position.y = 0.005;
+    ccScene.add(grid);
+
     const walkway = new THREE.Mesh(
         new THREE.PlaneGeometry(3.4, 22),
         new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.3 })
@@ -166,17 +180,18 @@ function buildControlRoom() {
         ccScene.add(line);
     });
 
+    // Paredes laterales altas de la nave (9m de altura)
     [-12.5, 12.5].forEach(xWall => {
         const wall = new THREE.Mesh(
-            new THREE.BoxGeometry(0.8, 7, 24),
+            new THREE.BoxGeometry(1.0, 9.5, 24),
             new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.5 })
         );
-        wall.position.set(xWall, 3.5, 0);
+        wall.position.set(xWall, 4.75, 0);
         ccScene.add(wall);
 
         for (let z = -8; z <= 8; z += 5.5) {
             const panel = new THREE.Mesh(
-                new THREE.BoxGeometry(0.9, 3.2, 2.8),
+                new THREE.BoxGeometry(1.1, 3.2, 2.8),
                 new THREE.MeshStandardMaterial({ color: 0x0284c7, emissive: 0x0369a1, emissiveIntensity: 0.45 })
             );
             panel.position.set(xWall > 0 ? xWall - 0.1 : xWall + 0.1, 3.4, z);
@@ -184,28 +199,748 @@ function buildControlRoom() {
         }
     });
 
+    // Pared trasera
+    const frontWall = new THREE.Mesh(
+        new THREE.BoxGeometry(26, 9.5, 1.0),
+        new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.5 })
+    );
+    frontWall.position.set(0, 4.75, 11.8);
+    ccScene.add(frontWall);
+
+    // Techo alto de la nave (y = 9.5)
+    const ceiling = new THREE.Mesh(
+        new THREE.BoxGeometry(26, 0.6, 24),
+        new THREE.MeshStandardMaterial({ color: 0x0b1324, roughness: 0.6 })
+    );
+    ceiling.position.set(0, 9.6, 0);
+    ccScene.add(ceiling);
+
+    // Ventanal panorámico frontal hacia el espacio
     const backWallBottom = new THREE.Mesh(
-        new THREE.BoxGeometry(26, 2.2, 0.8),
+        new THREE.BoxGeometry(26, 2.2, 0.9),
         new THREE.MeshStandardMaterial({ color: 0x1e293b })
     );
     backWallBottom.position.set(0, 1.1, -11.5);
     ccScene.add(backWallBottom);
 
+    const backWallTop = new THREE.Mesh(
+        new THREE.BoxGeometry(26, 1.6, 0.9),
+        new THREE.MeshStandardMaterial({ color: 0x1e293b })
+    );
+    backWallTop.position.set(0, 8.7, -11.5);
+    ccScene.add(backWallTop);
+
     const windowFrame = new THREE.Mesh(
-        new THREE.BoxGeometry(24, 0.25, 1),
+        new THREE.BoxGeometry(24, 0.25, 1.05),
         new THREE.MeshBasicMaterial({ color: 0x38bdf8 })
     );
     windowFrame.position.set(0, 2.2, -11.5);
     ccScene.add(windowFrame);
 
+    const topFrame = windowFrame.clone();
+    topFrame.position.set(0, 7.9, -11.5);
+    ccScene.add(topFrame);
+
     const starGeo = new THREE.BufferGeometry();
     const starVertices = [];
     for (let i = 0; i < 450; i++) {
-        starVertices.push((Math.random() - 0.5) * 85, Math.random() * 35 + 2, -14 - Math.random() * 35);
+        starVertices.push((Math.random() - 0.5) * 90, Math.random() * 35 + 1, -14 - Math.random() * 40);
     }
     starGeo.setAttribute('position', new THREE.Float32BufferAttribute(starVertices, 3));
     ccScene.add(new THREE.Points(starGeo, new THREE.PointsMaterial({ color: 0xffffff, size: 0.25 })));
 }
 
 function updateWindowPlanet(planetId) {
-    if (window
+    if (!ccScene) return;
+    if (windowPlanet && windowPlanet.group) {
+        ccScene.remove(windowPlanet.group);
+    }
+    const targetId = planetId || 'earth';
+    windowPlanet = createHDPlanet(targetId, 14);
+    windowPlanet.group.position.set(0, 4.5, -36);
+    ccScene.add(windowPlanet.group);
+
+    const orbitLabel = document.getElementById('orbit-location-label');
+    if (orbitLabel) {
+        if (targetId === 'earth') {
+            orbitLabel.innerText = 'ÓRBITA ACTUAL: PLANETA TIERRA';
+        } else {
+            const m = GAME_DATA.missions.find(x => x.id === targetId);
+            orbitLabel.innerText = m ? m.orbitLabel : 'ÓRBITA ACTUAL: ESPACIO PROFUNDO';
+        }
+    }
+}
+
+function createConsoleLabelSprite(text, hexColor) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 360;
+    canvas.height = 84;
+    const ctx = canvas.getContext('2d');
+
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.9)';
+    ctx.beginPath();
+    ctx.roundRect(10, 10, 340, 64, 14);
+    ctx.fill();
+
+    ctx.strokeStyle = hexColor;
+    ctx.lineWidth = 4;
+    ctx.stroke();
+
+    ctx.fillStyle = '#f8fafc';
+    ctx.font = 'bold 21px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(text, 180, 50);
+
+    const tex = new THREE.CanvasTexture(canvas);
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true }));
+    sprite.scale.set(3.2, 0.75, 1);
+    return sprite;
+}
+
+function buildStations() {
+    stations = [];
+    const stationDefs = [
+        {
+            id: 'planet',
+            name: '1. Mapa Estelar y Destino',
+            label: 'PANEL 1: DESTINO',
+            x: -6.8,
+            z: -5.2,
+            color: 0x38bdf8,
+            cssColor: '#38bdf8'
+        },
+        {
+            id: 'garage',
+            name: '2. Taller de Nave Espacial',
+            label: 'PANEL 2: TALLER NAVE',
+            x: 6.8,
+            z: -5.2,
+            color: 0xf59e0b,
+            cssColor: '#f59e0b'
+        },
+        {
+            id: 'protocol',
+            name: '3. Protocolo EVA y Rol',
+            label: 'PANEL 3: TRAJE Y ROL',
+            x: -6.8,
+            z: 3.6,
+            color: 0xa855f7,
+            cssColor: '#a855f7'
+        },
+        {
+            id: 'launch',
+            name: '4. Consola de Ignición y Despliegue',
+            label: 'PANEL 4: DESPLEGAR',
+            x: 6.8,
+            z: 3.6,
+            color: 0x10b981,
+            cssColor: '#10b981'
+        }
+    ];
+
+    stationDefs.forEach(def => {
+        const group = new THREE.Group();
+        group.position.set(def.x, 0, def.z);
+
+        const base = new THREE.Mesh(
+            new THREE.CylinderGeometry(1.15, 1.35, 1.15, 20),
+            new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.4, metalness: 0.5 })
+        );
+        base.position.y = 0.575;
+        group.add(base);
+
+        const screen = new THREE.Mesh(
+            new THREE.BoxGeometry(1.5, 0.9, 0.14),
+            new THREE.MeshStandardMaterial({ color: def.color, emissive: def.color, emissiveIntensity: 0.65 })
+        );
+        screen.position.set(0, 1.55, 0);
+        screen.rotation.x = -0.35;
+        group.add(screen);
+
+        const ring = new THREE.Mesh(
+            new THREE.RingGeometry(1.55, 1.8, 32),
+            new THREE.MeshBasicMaterial({ color: def.color, side: THREE.DoubleSide })
+        );
+        ring.rotation.x = -Math.PI / 2;
+        ring.position.y = 0.03;
+        group.add(ring);
+
+        const tag = createConsoleLabelSprite(def.label, def.cssColor);
+        tag.position.set(0, 2.55, 0);
+        group.add(tag);
+
+        ccScene.add(group);
+        stations.push({ ...def, group, screen, ring });
+    });
+}
+
+function setupControlCenterEvents(container) {
+    window.addEventListener('keydown', e => {
+        if (document.getElementById('control-center-container').classList.contains('hidden')) return;
+        const lobbyHidden = document.getElementById('lobby-modal').classList.contains('hidden');
+        if (!lobbyHidden) return;
+
+        ccKeys[e.code] = true;
+
+        if (e.code === 'Space' && !isModalOpen && astroGrounded) {
+            astroVelY = 0.24;
+            astroGrounded = false;
+        }
+        if (e.code === 'KeyE' && !isModalOpen && activeStation) {
+            openStationModal(activeStation);
+        }
+        if (e.code === 'Escape' && isModalOpen) {
+            closeConsoleModal();
+        }
+    });
+
+    window.addEventListener('keyup', e => {
+        ccKeys[e.code] = false;
+    });
+
+    container.addEventListener('mousedown', e => {
+        isDragging = true;
+        prevMouseX = e.clientX;
+    });
+
+    window.addEventListener('mousemove', e => {
+        if (!isDragging || isModalOpen) return;
+        const dx = e.clientX - prevMouseX;
+        prevMouseX = e.clientX;
+        camYaw -= dx * 0.0065;
+    });
+
+    window.addEventListener('mouseup', () => {
+        isDragging = false;
+    });
+
+    document.getElementById('station-prompt').onclick = () => {
+        if (activeStation && !isModalOpen) openStationModal(activeStation);
+    };
+
+    document.getElementById('close-modal-btn').onclick = closeConsoleModal;
+
+    window.addEventListener('resize', () => {
+        if (!ccRenderer || !ccCamera) return;
+        const c = document.getElementById('webgl-canvas-container');
+        if (!c || c.clientWidth === 0) return;
+        ccCamera.aspect = c.clientWidth / c.clientHeight;
+        ccCamera.updateProjectionMatrix();
+        ccRenderer.setSize(c.clientWidth, c.clientHeight);
+    });
+}
+
+function closeConsoleModal() {
+    isModalOpen = false;
+    document.getElementById('console-modal').classList.add('hidden');
+    document.getElementById('console-modal-card').classList.remove('garage-wide');
+    if (previewAnimId) {
+        cancelAnimationFrame(previewAnimId);
+        previewAnimId = null;
+    }
+}
+
+function openStationModal(station) {
+    isModalOpen = true;
+    const modal = document.getElementById('console-modal');
+    const card = document.getElementById('console-modal-card');
+    const title = document.getElementById('modal-title');
+    const body = document.getElementById('modal-body');
+
+    card.classList.remove('garage-wide');
+    title.innerText = station.name;
+
+    if (station.id === 'planet') {
+        renderPlanetStationUI(body);
+    } else if (station.id === 'garage') {
+        card.classList.add('garage-wide');
+        garageFeedbackMsg = '';
+        renderGarageStationUI(body);
+    } else if (station.id === 'protocol') {
+        // PANEL 3: Configuración de Traje EVA, Rol y Objetivos asignados (SIN botón de desplegar nave)
+        renderProtocolStationUI(body);
+    } else if (station.id === 'launch') {
+        // PANEL 4: Resumen de Misión y Botón de Ignición / Despliegue de Nave
+        renderLaunchStationUI(body);
+    }
+
+    modal.classList.remove('hidden');
+}
+
+function renderPlanetStationUI(body) {
+    body.innerHTML = `
+        <p style="color:#cbd5e1; font-size:0.88rem; margin-bottom:12px;">
+            Selecciona el cuerpo celeste de destino para toda la tripulación. Cada planeta aumenta la intensidad de meteoritos y la recompensa en créditos.
+        </p>
+        <div class="option-grid">
+            ${GAME_DATA.missions.map(m => `
+                <div class="option-card ${GAME_STATE.selectedMission.id === m.id ? 'selected' : ''}" data-mid="${m.id}">
+                    <h4>🪐 ${m.name}</h4>
+                    <p>${m.desc}</p>
+                    <span class="price-badge unlocked">Dificultad: ${m.difficulty} • +${m.rewardCredits} CR</span>
+                </div>
+            `).join('')}
+        </div>
+        <button id="confirm-planet-btn" class="btn-primary">✓ Confirmar Rumbo Orbital</button>
+    `;
+
+    body.querySelectorAll('.option-card').forEach(el => {
+        el.onclick = () => {
+            const found = GAME_DATA.missions.find(x => x.id === el.dataset.mid);
+            if (found) {
+                GAME_STATE.selectedMission = found;
+                updateWindowPlanet(found.id);
+                updateTopMissionBadge();
+                MP.broadcastRoomState();
+                renderPlanetStationUI(body);
+            }
+        };
+    });
+
+    document.getElementById('confirm-planet-btn').onclick = closeConsoleModal;
+}
+
+function renderProtocolStationUI(body) {
+    MP.refreshTakenRolesFromPlayers();
+    const currentRole = GAME_STATE.selectedRole;
+    const currentProto = GAME_STATE.selectedSuitProtocol || GAME_DATA.suitProtocols[0];
+
+    body.innerHTML = `
+        <p style="color:#cbd5e1; font-size:0.86rem; margin-bottom:10px;">
+            Configura el <strong>protocolo técnico de tu traje espacial EVA</strong> y verifica las <strong>3 salas específicas</strong> asignadas a tu especialidad dentro de la base planetaria.
+        </p>
+
+        <div class="section-label">1. Protocolo de Soporte Vital del Traje EVA</div>
+        <div class="option-grid">
+            ${GAME_DATA.suitProtocols.map(sp => `
+                <div class="option-card ${currentProto.id === sp.id ? 'selected' : ''}" data-proto="${sp.id}">
+                    <h4>🧑‍🚀 ${sp.name}</h4>
+                    <p>${sp.desc}</p>
+                    <span class="price-badge ${currentProto.id === sp.id ? 'equipped' : 'unlocked'}">
+                        ${currentProto.id === sp.id ? '✓ ACTIVO' : 'Seleccionar'}
+                    </span>
+                </div>
+            `).join('')}
+        </div>
+
+        <div class="section-label">2. Especialidad de Tripulación (Roles únicos en sala)</div>
+        <div class="option-grid">
+            ${GAME_DATA.roles.map(r => {
+                const takenBy = MP.takenRolesByOthers[r.id];
+                const isSel = !takenBy && currentRole.id === r.id;
+                return `
+                    <div class="option-card ${isSel ? 'selected' : ''} ${takenBy ? 'taken' : ''}" data-role="${r.id}">
+                        <h4><span class="color-swatch" style="background:${r.colorCss};"></span> ${r.name}</h4>
+                        <p>${r.bonus}</p>
+                        ${takenBy ? `<span class="role-taken-pill">🔒 Ocupado por ${takenBy}</span>` : ''}
+                    </div>
+                `;
+            }).join('')}
+        </div>
+
+        <div class="section-label">3. tus 3 Terminales Asignadas en el Complejo 68×68m</div>
+        <div class="task-preview-list">
+            ${currentRole.tasks.map((t, idx) => `
+                <div>
+                    <strong>${idx + 1}. ${t.title}</strong> — <span style="color:${currentRole.colorCss};">${t.roomName}</span>
+                </div>
+            `).join('')}
+        </div>
+
+        <button id="save-protocol-btn" class="btn-primary">✓ Guardar Configuración de Traje y Rol</button>
+    `;
+
+    body.querySelectorAll('[data-proto]').forEach(el => {
+        el.onclick = () => {
+            const p = GAME_DATA.suitProtocols.find(x => x.id === el.dataset.proto);
+            if (p) {
+                GAME_STATE.selectedSuitProtocol = p;
+                renderProtocolStationUI(body);
+            }
+        };
+    });
+
+    body.querySelectorAll('[data-role]').forEach(el => {
+        el.onclick = () => {
+            const rid = el.dataset.role;
+            if (MP.takenRolesByOthers[rid]) return;
+            const role = GAME_DATA.roles.find(x => x.id === rid);
+            if (role) {
+                GAME_STATE.selectedRole = role;
+                MP.syncLocalPlayerEntry();
+                MP.broadcastRoomState();
+                updateTopMissionBadge();
+                if (astroRig) rebuildControlCenterAstronaut(astroRig.group.position.clone());
+                renderProtocolStationUI(body);
+            }
+        };
+    });
+
+    document.getElementById('save-protocol-btn').onclick = closeConsoleModal;
+}
+
+function renderLaunchStationUI(body) {
+    const m = GAME_STATE.selectedMission;
+    const r = GAME_STATE.selectedRole;
+    const stats = GAME_STATE.getShipTotalStats();
+    const crew = Object.values(MP.players);
+
+    body.innerHTML = `
+        <div class="task-preview-list" style="margin-bottom:14px;">
+            <div>🪐 <strong>Destino Seleccionado:</strong> ${m.name} (${m.difficulty} — Recompensa: +${m.rewardCredits} CR)</div>
+            <div>🧑‍🚀 <strong>Tu Especialidad:</strong> <span style="color:${r.colorCss}; font-weight:700;">${r.name}</span> (${GAME_STATE.selectedSuitProtocol.name})</div>
+            <div>🚀 <strong>Bonificaciones de Nave + Traje:</strong> Velocidad ×${stats.speedMult.toFixed(2)} | Escudo +${stats.shieldBonus}% | Oxígeno +${stats.o2Bonus}s</div>
+        </div>
+
+        <div class="section-label">Tripulación Lista para Despegue (${crew.length}/${MP.maxPlayers})</div>
+        <div class="players-list" style="margin-bottom:14px;">
+            ${crew.map(p => {
+                const pr = GAME_DATA.roles.find(x => x.id === p.roleId) || GAME_DATA.roles[0];
+                const pc = GAME_DATA.characters.find(x => x.id === p.characterId) || GAME_DATA.characters[0];
+                return `
+                    <div class="player-slot-row">
+                        <span><strong>${p.name}</strong> (${pc.shortName})</span>
+                        <span style="color:${pr.colorCss}; font-weight:700;">${pr.short}</span>
+                    </div>
+                `;
+            }).join('')}
+        </div>
+
+        <p style="font-size:0.82rem; color:#94a3b8; margin-bottom:10px;">
+            Al iniciar la ignición, pilotarás la nave hacia <strong>${m.name}</strong> y luego aterrizarás en la base de 9 salas para completar tus 3 tareas únicas.
+        </p>
+
+        <button id="deploy-ship-btn" class="btn-primary">🚀 INICIAR IGNICIÓN Y DESPEGAR NAVE</button>
+    `;
+
+    document.getElementById('deploy-ship-btn').onclick = () => {
+        beginMissionLaunch(false);
+    };
+}
+
+function renderGarageStationUI(body) {
+    const stats = GAME_STATE.getShipTotalStats();
+    const cfg = GAME_STATE.shipConfig;
+
+    const tabDefs = [
+        { key: 'noses', label: 'Punta', list: GAME_DATA.shipCustomization.noses, cur: cfg.nose.id, field: 'nose' },
+        { key: 'wings', label: 'Alas', list: GAME_DATA.shipCustomization.wings, cur: cfg.wing.id, field: 'wing' },
+        { key: 'boosters', label: 'Propulsores', list: GAME_DATA.shipCustomization.boosters, cur: cfg.booster.id, field: 'booster' },
+        { key: 'hulls', label: 'Fuselaje', list: GAME_DATA.shipCustomization.hulls, cur: cfg.hull.id, field: 'hull' },
+        { key: 'primaryColors', label: 'Color Base', list: GAME_DATA.shipCustomization.primaryColors, cur: cfg.primaryColor.id, field: 'primaryColor' },
+        { key: 'secondaryColors', label: 'Franjas', list: GAME_DATA.shipCustomization.secondaryColors, cur: cfg.secondaryColor.id, field: 'secondaryColor' }
+    ];
+
+    const activeTabObj = tabDefs.find(t => t.key === garageTab) || tabDefs[0];
+    const speedPct = Math.min(100, Math.round((stats.speedMult - 0.85) * 140));
+    const shieldPct = Math.min(100, Math.round((stats.shieldBonus / 120) * 100));
+    const o2Pct = Math.min(100, Math.round((stats.o2Bonus / 140) * 100));
+
+    body.innerHTML = `
+        <div class="garage-layout">
+            <div class="garage-left">
+                <div id="ship-preview-canvas"></div>
+                <div class="equipped-summary">
+                    <div>💰 <strong>Créditos Disponibles:</strong> <span style="color:#fbbf24;">${GAME_STATE.credits} CR</span></div>
+                    <div>🚀 <strong>Configuración:</strong> ${cfg.nose.name} • ${cfg.wing.name} • ${cfg.booster.name}</div>
+                </div>
+                <div class="garage-stats">
+                    <div class="stat-row">
+                        <span><strong>Velocidad Orbital</strong><strong>×${stats.speedMult.toFixed(2)}</strong></span>
+                        <div class="progress-track"><div class="progress-fill cyan" style="width:${Math.max(18, speedPct)}%;"></div></div>
+                    </div>
+                    <div class="stat-row">
+                        <span><strong>Blindaje de Escudo</strong><strong>+${stats.shieldBonus}%</strong></span>
+                        <div class="progress-track"><div class="progress-fill amber" style="width:${Math.max(12, shieldPct)}%;"></div></div>
+                    </div>
+                    <div class="stat-row">
+                        <span><strong>Reserva Extra O2</strong><strong>+${stats.o2Bonus}s</strong></span>
+                        <div class="progress-track"><div class="progress-fill green" style="width:${Math.max(12, o2Pct)}%;"></div></div>
+                    </div>
+                </div>
+            </div>
+
+            <div>
+                <div class="garage-tabs">
+                    ${tabDefs.map(t => `
+                        <button class="garage-tab-btn ${t.key === garageTab ? 'active' : ''}" data-gtab="${t.key}">${t.label}</button>
+                    `).join('')}
+                </div>
+
+                ${garageFeedbackMsg ? `<p style="font-size:0.82rem; color:#fbbf24; margin-bottom:8px; font-weight:600;">${garageFeedbackMsg}</p>` : ''}
+
+                <div class="option-grid">
+                    ${activeTabObj.list.map(item => {
+                        const isUnlocked = GAME_STATE.unlockedParts.includes(item.id) || item.price === 0;
+                        const isEquipped = activeTabObj.cur === item.id;
+                        const swatch = item.css ? `<span class="color-swatch" style="background:${item.css};"></span>` : '';
+                        let badgeHtml = '';
+                        if (isEquipped) {
+                            badgeHtml = `<span class="price-badge equipped">✓ EQUIPADO</span>`;
+                        } else if (isUnlocked) {
+                            badgeHtml = `<span class="price-badge unlocked">Equipar (Desbloqueado)</span>`;
+                        } else {
+                            badgeHtml = `<span class="price-badge locked">🔒 Comprar: ${item.price} CR</span>`;
+                        }
+                        return `
+                            <div class="option-card ${isEquipped ? 'selected' : ''}" data-part="${item.id}">
+                                <h4>${swatch}${item.name}</h4>
+                                <p>${item.desc}</p>
+                                ${badgeHtml}
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+            </div>
+        </div>
+    `;
+
+    body.querySelectorAll('.garage-tab-btn').forEach(btn => {
+        btn.onclick = () => {
+            garageTab = btn.dataset.gtab;
+            garageFeedbackMsg = '';
+            renderGarageStationUI(body);
+        };
+    });
+
+    body.querySelectorAll('[data-part]').forEach(cardEl => {
+        cardEl.onclick = () => {
+            const partId = cardEl.dataset.part;
+            const part = activeTabObj.list.find(x => x.id === partId);
+            if (!part) return;
+
+            const isUnlocked = GAME_STATE.unlockedParts.includes(part.id) || part.price === 0;
+            if (!isUnlocked) {
+                if (GAME_STATE.credits < part.price) {
+                    garageFeedbackMsg = `⚠️ Créditos insuficientes (${part.price} CR necesarios). Completa misiones para ganar más.`;
+                    renderGarageStationUI(body);
+                    return;
+                }
+                GAME_STATE.credits -= part.price;
+                GAME_STATE.unlockedParts.push(part.id);
+                garageFeedbackMsg = `🎉 ¡Pieza "${part.name}" comprada y equipada!`;
+                updateCreditsHUD();
+            } else {
+                garageFeedbackMsg = '';
+            }
+
+            GAME_STATE.shipConfig[activeTabObj.field] = part;
+            GAME_STATE.saveProgress();
+            renderGarageStationUI(body);
+        };
+    });
+
+    initShipPreview3D();
+}
+
+function initShipPreview3D() {
+    const holder = document.getElementById('ship-preview-canvas');
+    if (!holder) return;
+    holder.innerHTML = '';
+
+    if (previewAnimId) cancelAnimationFrame(previewAnimId);
+
+    previewScene = new THREE.Scene();
+    previewCamera = new THREE.PerspectiveCamera(45, holder.clientWidth / holder.clientHeight, 0.1, 50);
+    previewCamera.position.set(0, 0.5, 6.4);
+
+    previewRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    previewRenderer.setSize(holder.clientWidth, holder.clientHeight);
+    holder.appendChild(previewRenderer.domElement);
+
+    previewScene.add(new THREE.AmbientLight(0xffffff, 0.9));
+    const dir = new THREE.DirectionalLight(0x38bdf8, 1.2);
+    dir.position.set(4, 6, 5);
+    previewScene.add(dir);
+
+    previewRocket = buildCustom3DRocket(true);
+    previewRocket.scale.setScalar(0.88);
+    previewRocket.position.y = 0.25;
+    previewScene.add(previewRocket);
+
+    holder.onmousedown = e => {
+        previewDragging = true;
+        previewPrevX = e.clientX;
+    };
+    window.addEventListener('mousemove', e => {
+        if (!previewDragging) return;
+        const dx = e.clientX - previewPrevX;
+        previewPrevX = e.clientX;
+        previewRotY += dx * 0.015;
+    });
+    window.addEventListener('mouseup', () => {
+        previewDragging = false;
+    });
+
+    previewLastTime = performance.now();
+    function loopPreview(now) {
+        if (!document.getElementById('ship-preview-canvas')) return;
+        const dt = Math.min(0.05, (now - previewLastTime) / 1000);
+        previewLastTime = now;
+
+        if (!previewDragging) previewRotY += dt * 0.8;
+        if (previewRocket) {
+            previewRocket.rotation.y = previewRotY;
+            animateRocketExhaust(previewRocket, dt);
+        }
+        previewRenderer.render(previewScene, previewCamera);
+        previewAnimId = requestAnimationFrame(loopPreview);
+    }
+    previewAnimId = requestAnimationFrame(loopPreview);
+}
+
+function beginMissionLaunch(fromRemote) {
+    closeConsoleModal();
+    if (!fromRemote && MP.isHost) {
+        MP.broadcastLaunch();
+    }
+
+    const ccContainer = document.getElementById('control-center-container');
+    ccContainer.classList.add('shaking');
+
+    setTimeout(() => {
+        ccContainer.classList.remove('shaking');
+        ccContainer.classList.add('hidden');
+        if (ccAnimId) {
+            cancelAnimationFrame(ccAnimId);
+            ccAnimId = null;
+        }
+        if (typeof startPhoraArena === 'function') {
+            startPhoraArena();
+        }
+    }, 950);
+}
+
+function returnToControlCenter() {
+    document.getElementById('arena-container').classList.add('hidden');
+    document.getElementById('report-modal').classList.add('hidden');
+    document.getElementById('planet-task-modal').classList.add('hidden');
+    document.getElementById('control-center-container').classList.remove('hidden');
+
+    GAME_STATE.currentOrbitId = 'earth';
+    updateWindowPlanet('earth');
+    updateCreditsHUD();
+    updateTopMissionBadge();
+
+    ccLastTime = performance.now();
+    if (!ccAnimId) animateControlCenter();
+}
+
+function animateControlCenter(now) {
+    ccAnimId = requestAnimationFrame(animateControlCenter);
+    const tNow = now || performance.now();
+    const dt = Math.min(0.05, (tNow - ccLastTime) / 1000);
+    ccLastTime = tNow;
+    const elapsed = tNow * 0.001;
+
+    if (windowPlanet && windowPlanet.sphere) {
+        windowPlanet.sphere.rotation.y += dt * 0.08;
+    }
+
+    stations.forEach((st, idx) => {
+        st.ring.scale.setScalar(1 + Math.sin(elapsed * 3 + idx) * 0.04);
+    });
+
+    if (astroRig && astroRig.group) {
+        let moving = false;
+        if (!isModalOpen && document.getElementById('lobby-modal').classList.contains('hidden')) {
+            let forward = 0;
+            let strafe = 0;
+            if (ccKeys['KeyW'] || ccKeys['ArrowUp']) forward -= 1;
+            if (ccKeys['KeyS'] || ccKeys['ArrowDown']) forward += 1;
+            if (ccKeys['KeyA'] || ccKeys['ArrowLeft']) strafe -= 1;
+            if (ccKeys['KeyD'] || ccKeys['ArrowRight']) strafe += 1;
+
+            const speed = (ccKeys['ShiftLeft'] || ccKeys['ShiftRight']) ? 0.15 : 0.095;
+            if (forward !== 0 || strafe !== 0) {
+                moving = true;
+                const sinY = Math.sin(camYaw);
+                const cosY = Math.cos(camYaw);
+                const vx = strafe * cosY + forward * sinY;
+                const vz = -strafe * sinY + forward * cosY;
+                const len = Math.hypot(vx, vz) || 1;
+
+                astroRig.group.position.x += (vx / len) * speed;
+                astroRig.group.position.z += (vz / len) * speed;
+                astroRig.group.rotation.y = Math.atan2(vx, vz);
+            }
+        }
+
+        // Límites interiores de la sala de control
+        astroRig.group.position.x = Math.max(-10.8, Math.min(10.8, astroRig.group.position.x));
+        astroRig.group.position.z = Math.max(-9.6, Math.min(10.2, astroRig.group.position.z));
+
+        // Gravedad y salto
+        if (!astroGrounded) {
+            astroRig.group.position.y += astroVelY;
+            astroVelY -= 0.013;
+            if (astroRig.group.position.y <= 0) {
+                astroRig.group.position.y = 0;
+                astroVelY = 0;
+                astroGrounded = true;
+            }
+        }
+
+        if (astroRig.propellerMesh) astroRig.propellerMesh.rotation.y += 0.25;
+
+        if (!astroGrounded) {
+            astroRig.leftArm.rotation.x = -0.6;
+            astroRig.rightArm.rotation.x = -0.6;
+        } else if (moving) {
+            const swing = Math.sin(elapsed * 11) * 0.52;
+            astroRig.leftLeg.rotation.x = swing;
+            astroRig.rightLeg.rotation.x = -swing;
+            astroRig.leftArm.rotation.x = -swing;
+            astroRig.rightArm.rotation.x = swing;
+        } else {
+            astroRig.leftLeg.rotation.x = 0;
+            astroRig.rightLeg.rotation.x = 0;
+            astroRig.leftArm.rotation.x = 0;
+            astroRig.rightArm.rotation.x = 0;
+        }
+
+        MP.sendMyPosition(
+            astroRig.group.position.x,
+            astroRig.group.position.y,
+            astroRig.group.position.z,
+            astroRig.group.rotation.y,
+            moving
+        );
+
+        // Detectar consola cercana
+        let nearest = null;
+        let minDist = 3.1;
+        stations.forEach(st => {
+            const d = Math.hypot(astroRig.group.position.x - st.x, astroRig.group.position.z - st.z);
+            if (d < minDist) {
+                minDist = d;
+                nearest = st;
+            }
+        });
+        activeStation = nearest;
+        const promptBtn = document.getElementById('station-prompt');
+        if (activeStation && !isModalOpen) {
+            document.getElementById('prompt-station-name').innerText = activeStation.name;
+            promptBtn.classList.remove('hidden');
+        } else {
+            promptBtn.classList.add('hidden');
+        }
+
+        // Cámara tercera persona dentro de los límites de la sala
+        const camDist = 7.4;
+        const rawCamX = astroRig.group.position.x + Math.sin(camYaw) * camDist;
+        const rawCamZ = astroRig.group.position.z + Math.cos(camYaw) * camDist;
+        ccCamera.position.x = Math.max(-11.2, Math.min(11.2, rawCamX));
+        ccCamera.position.z = Math.max(-10.2, Math.min(10.8, rawCamZ));
+        ccCamera.position.y = Math.min(8.2, astroRig.group.position.y + 4.2);
+        ccCamera.lookAt(astroRig.group.position.x, astroRig.group.position.y + 1.8, astroRig.group.position.z);
+    }
+
+    syncAllRemoteAstronauts(elapsed, dt);
+    ccRenderer.render(ccScene, ccCamera);
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+    MP.initLobbyUI();
+    initControlCenter();
+});
